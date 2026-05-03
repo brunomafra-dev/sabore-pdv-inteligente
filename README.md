@@ -27,6 +27,7 @@ Copy `.env.example` to `.env.local` and fill only what you need:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `FOCUS_NFE_TOKEN`
 - `MERCADO_PAGO_ACCESS_TOKEN`
 - `WHATSAPP_ACCESS_TOKEN`
@@ -35,5 +36,7 @@ Copy `.env.example` to `.env.local` and fill only what you need:
 ## Supabase
 
 Run `supabase/schema.sql` in a Supabase project to create the first production-ready data model.
+Then run `supabase/seed.sql` to load the pilot data used by the local MVP.
+Use the project base URL in `NEXT_PUBLIC_SUPABASE_URL`, for example `https://example.supabase.co`, not the REST endpoint ending in `/rest/v1`.
 
 See `docs/architecture.md` for module boundaries and v1 limits.

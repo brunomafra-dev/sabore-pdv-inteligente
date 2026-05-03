@@ -180,7 +180,13 @@ function buildFiscalPayload(order: Order, data: SaboreData) {
   };
 }
 
-export function SaboreApp({ initialData }: { initialData: SaboreData }) {
+export function SaboreApp({
+  initialData,
+  dataSource,
+}: {
+  initialData: SaboreData;
+  dataSource?: { source: "supabase" | "demo"; message: string };
+}) {
   const [activeView, setActiveView] = useState<View>("overview");
   const [orders, setOrders] = useState(() => cloneData(initialData.orders));
   const [lots, setLots] = useState(() => cloneData(initialData.lots));
@@ -466,6 +472,9 @@ export function SaboreApp({ initialData }: { initialData: SaboreData }) {
                 <Badge variant="info">Piloto local</Badge>
                 <Badge variant="neutral">100% web online</Badge>
                 <Badge variant="warning">Fiscal repassado</Badge>
+                <Badge variant={dataSource?.source === "supabase" ? "success" : "neutral"}>
+                  {dataSource?.source === "supabase" ? "Supabase" : "Demo"}
+                </Badge>
               </div>
               <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
                 Controle completo do pedido ao CMV
@@ -474,6 +483,11 @@ export function SaboreApp({ initialData }: { initialData: SaboreData }) {
                 PDV, mesas, delivery proprio, cozinha, estoque, validade, caixa,
                 NFC-e via API e WhatsApp guiado em uma rotina unica.
               </p>
+              {dataSource?.message && (
+                <p className="mt-2 max-w-3xl text-xs leading-5 text-muted-foreground">
+                  {dataSource.message}
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-3 gap-2 sm:flex">
               <Button onClick={() => createOrder("counter")}>

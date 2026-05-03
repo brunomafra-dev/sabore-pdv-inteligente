@@ -15,7 +15,7 @@ Sabore is a web-first restaurant operating system for local pilots in Maceio.
 
 ## Data Strategy
 
-The current UI runs with demo data from `src/lib/demo-data.ts`. The Supabase schema in `supabase/schema.sql` mirrors the same entities so the demo can be replaced table by table without changing the product vocabulary.
+The UI attempts to load Supabase data server-side when env vars are present. If env vars are missing, RLS blocks the read, or the database has not been seeded, it falls back to `src/lib/demo-data.ts`. Run `supabase/schema.sql` first and `supabase/seed.sql` second to load the pilot dataset.
 
 ## Commercial Defaults
 

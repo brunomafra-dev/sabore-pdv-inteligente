@@ -1,6 +1,15 @@
 import { SaboreApp } from "@/components/sabore-app";
-import { demoData } from "@/lib/demo-data";
+import { getSaboreData } from "@/lib/supabase/sabore-data";
 
-export default function Home() {
-  return <SaboreApp initialData={demoData} />;
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const result = await getSaboreData();
+
+  return (
+    <SaboreApp
+      initialData={result.data}
+      dataSource={{ source: result.source, message: result.message }}
+    />
+  );
 }
