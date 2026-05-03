@@ -78,7 +78,7 @@ type ComposerState = {
 };
 
 const statusLabel: Record<OrderStatus, string> = {
-  new: "Novo",
+  new: "Fila",
   preparing: "Em preparo",
   ready: "Pronto",
   delivered: "Entregue",
@@ -138,6 +138,34 @@ function channelIcon(channel: SalesChannel) {
   if (channel === "delivery") return Truck;
 
   return Store;
+}
+
+function kitchenActionLabel(status: OrderStatus) {
+  const labels: Partial<Record<OrderStatus, string>> = {
+    new: "Em preparo",
+    preparing: "Pronto",
+    ready: "Entregar",
+  };
+
+  return labels[status] ?? "Avancar";
+}
+
+function minutesSince(isoDate: string, baseIso = now) {
+  const start = new Date(isoDate).getTime();
+  const end = new Date(baseIso).getTime();
+
+  if (Number.isNaN(start) || Number.isNaN(end)) return 0;
+
+  return Math.max(0, Math.round((end - start) / 60_000));
+}
+
+function formatDuration(minutes: number) {
+  if (minutes < 60) return `${minutes} min`;
+
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+
+  return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
 function deductLotsByMovements(
@@ -1094,6 +1122,7 @@ function PosView({
         const totals = calculateOrderTotals(order, data.products);
         const ChannelIcon = channelIcon(order.channel);
         const canPay = totals.remaining > 0 && order.status !== "cancelled";
+        const elapsedMinutes = minutesSince(order.openedAt);
 
         return (
           <Card key={order.id}>
@@ -1107,6 +1136,10 @@ function PosView({
                   </Badge>
                   <Badge variant={orderStatusVariant(order.status)}>
                     {statusLabel[order.status]}
+                  </Badge>
+                  <Badge variant={elapsedMinutes > 30 ? "warning" : "neutral"}>
+                    <Clock3 className="mr-1 size-3" />
+                    {formatDuration(elapsedMinutes)}
                   </Badge>
                   <Badge variant={order.fiscalStatus === "authorized" ? "success" : "neutral"}>
                     NFC-e {order.fiscalStatus}
@@ -1187,43 +1220,99 @@ function KitchenView({
   onAdvance: (orderId: string) => void;
 }) {
   const columns: OrderStatus[] = ["new", "preparing", "ready"];
+  const visibleOrders = orders.filter((order) => columns.includes(order.status));
+  const averageMinutes =
+    visibleOrders.length > 0
+      ? Math.round(
+          visibleOrders.reduce(
+            (sum, order) => sum + minutesSince(order.openedAt),
+            0,
+          ) / visibleOrders.length,
+        )
+      : 0;
 
   return (
-    <div className="grid gap-4 pt-5 xl:grid-cols-3">
-      {columns.map((status) => (
-        <Card key={status}>
-          <CardHeader>
-            <CardTitle>{statusLabel[status]}</CardTitle>
-            <CardDescription>Fila de producao por status.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {orders
-              .filter((order) => order.status === status)
-              .map((order) => (
-                <div key={order.id} className="rounded-lg border border-border bg-muted/20 p-4">
-                  <div className="flex items-center justify-between">
-                    <Badge variant="info">#{order.code}</Badge>
-                    <Badge variant="neutral">{channelLabel[order.channel]}</Badge>
-                  </div>
-                  <div className="mt-3 space-y-2 text-sm">
-                    {order.items.map((item) => (
-                      <p key={item.id}>{getItemLabel(item, data.products)}</p>
-                    ))}
-                  </div>
-                  <Button className="mt-4 w-full" size="sm" onClick={() => onAdvance(order.id)}>
-                    <ArrowUpRight />
-                    Proximo status
-                  </Button>
-                </div>
-              ))}
-            {!orders.some((order) => order.status === status) && (
-              <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-                Sem pedidos nesta coluna.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      ))}
+    <div className="space-y-4 pt-5">
+      <div className="grid gap-4 md:grid-cols-3">
+        <MetricCard
+          label="Media dos pedidos"
+          value={formatDuration(averageMinutes)}
+          helper="Tempo medio dos pedidos em fila, preparo e pronto."
+          icon={Timer}
+          tone={averageMinutes > 30 ? "warning" : "neutral"}
+        />
+        <MetricCard
+          label="Mais antigo"
+          value={formatDuration(
+            visibleOrders.length
+              ? Math.max(...visibleOrders.map((order) => minutesSince(order.openedAt)))
+              : 0,
+          )}
+          helper="Ajuda a enxergar gargalos antes da reclamacao."
+          icon={Clock3}
+          tone="warning"
+        />
+        <MetricCard
+          label="Pedidos ativos"
+          value={String(visibleOrders.length)}
+          helper="Fila operacional da cozinha neste momento."
+          icon={ChefHat}
+        />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        {columns.map((status) => (
+          <Card key={status}>
+            <CardHeader>
+              <CardTitle>{statusLabel[status]}</CardTitle>
+              <CardDescription>Fila de producao por status.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {orders
+                .filter((order) => order.status === status)
+                .map((order) => {
+                  const elapsedMinutes = minutesSince(order.openedAt);
+
+                  return (
+                    <div
+                      key={order.id}
+                      className="rounded-lg border border-border bg-muted/20 p-4"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Badge variant="info">#{order.code}</Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={elapsedMinutes > 30 ? "warning" : "neutral"}>
+                            <Clock3 className="mr-1 size-3" />
+                            {formatDuration(elapsedMinutes)}
+                          </Badge>
+                          <Badge variant="neutral">{channelLabel[order.channel]}</Badge>
+                        </div>
+                      </div>
+                      <div className="mt-3 space-y-2 text-sm">
+                        {order.items.map((item) => (
+                          <p key={item.id}>{getItemLabel(item, data.products)}</p>
+                        ))}
+                      </div>
+                      <Button
+                        className="mt-4 w-full"
+                        size="sm"
+                        onClick={() => onAdvance(order.id)}
+                      >
+                        <ArrowUpRight />
+                        {kitchenActionLabel(order.status)}
+                      </Button>
+                    </div>
+                  );
+                })}
+              {!orders.some((order) => order.status === status) && (
+                <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                  Sem pedidos nesta coluna.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
