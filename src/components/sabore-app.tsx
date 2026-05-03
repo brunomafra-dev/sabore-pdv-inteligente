@@ -12,6 +12,7 @@ import {
   Clock3,
   CreditCard,
   MessageCircle,
+  Minus,
   PackageCheck,
   Plus,
   ReceiptText,
@@ -23,6 +24,7 @@ import {
   Timer,
   Truck,
   WalletCards,
+  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
@@ -65,6 +67,16 @@ type View =
   | "reports"
   | "integrations";
 
+type ComposerState = {
+  channel: SalesChannel;
+  tableId: string;
+  customerId: string;
+  items: Record<string, number>;
+  notes: Record<string, string>;
+  deliveryFee: string;
+  discount: string;
+};
+
 const statusLabel: Record<OrderStatus, string> = {
   new: "Novo",
   preparing: "Em preparo",
@@ -104,6 +116,9 @@ const navItems: Array<{
   { id: "reports", label: "Relatorios", icon: BarChart3 },
   { id: "integrations", label: "Integracoes", icon: ReceiptText },
 ];
+
+const emptyComposerItems: ComposerState["items"] = {};
+const emptyComposerNotes: ComposerState["notes"] = {};
 
 function cloneData<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -194,6 +209,7 @@ export function SaboreApp({
   const [cashSession, setCashSession] = useState<CashSession>(() =>
     cloneData(initialData.cashSession),
   );
+  const [composer, setComposer] = useState<ComposerState | null>(null);
   const [activity, setActivity] = useState<string[]>([
     "Sabore iniciado com operacao demo em Ponta Verde",
     "Caixa aberto com R$ 150,00 de fundo",
@@ -241,41 +257,98 @@ export function SaboreApp({
     setActivity((current) => [message, ...current].slice(0, 6));
   }
 
-  function createOrder(channel: SalesChannel) {
+  function openComposer(channel: SalesChannel) {
+    setActiveView("pos");
+    setComposer({
+      channel,
+      tableId:
+        channel === "table"
+          ? data.tables.find((table) => table.status !== "closing")?.id ?? ""
+          : "",
+      customerId: channel === "delivery" ? data.customers[0]?.id ?? "" : "",
+      items: emptyComposerItems,
+      notes: emptyComposerNotes,
+      deliveryFee: channel === "delivery" ? "8" : "0",
+      discount: "0",
+    });
+  }
+
+  function updateComposerItem(productId: string, delta: number) {
+    setComposer((current) => {
+      if (!current) return current;
+
+      const quantity = Math.max(0, (current.items[productId] ?? 0) + delta);
+      const items = { ...current.items };
+      const notes = { ...current.notes };
+
+      if (quantity === 0) {
+        delete items[productId];
+        delete notes[productId];
+      } else {
+        items[productId] = quantity;
+      }
+
+      return { ...current, items, notes };
+    });
+  }
+
+  function updateComposerNote(productId: string, note: string) {
+    setComposer((current) =>
+      current
+        ? { ...current, notes: { ...current.notes, [productId]: note } }
+        : current,
+    );
+  }
+
+  function patchComposer(patch: Partial<ComposerState>) {
+    setComposer((current) => (current ? { ...current, ...patch } : current));
+  }
+
+  function submitComposer() {
+    if (!composer) return;
+
+    const selectedItems = Object.entries(composer.items)
+      .filter(([, quantity]) => quantity > 0)
+      .map(([productId, quantity], index) => ({
+        id: `item-${Date.now()}-${index}`,
+        productId,
+        quantity,
+        notes: composer.notes[productId]?.trim() || undefined,
+      }));
+
+    if (selectedItems.length === 0) {
+      log("Selecione pelo menos um item antes de abrir o pedido");
+      return;
+    }
+
+    if (composer.channel === "table" && !composer.tableId) {
+      log("Selecione uma mesa para abrir o pedido");
+      return;
+    }
+
+    if (composer.channel === "delivery" && !composer.customerId) {
+      log("Selecione um cliente para abrir o delivery");
+      return;
+    }
+
     const maxCode = Math.max(...orders.map((order) => Number(order.code)), 100);
     const code = String(maxCode + 1);
-    const productBundles: Record<SalesChannel, Order["items"]> = {
-      counter: [
-        { id: `item-${code}-1`, productId: "prd-acai", quantity: 1 },
-        { id: `item-${code}-2`, productId: "prd-tapioca", quantity: 1 },
-      ],
-      table: [
-        { id: `item-${code}-1`, productId: "prd-poke", quantity: 1 },
-        { id: `item-${code}-2`, productId: "prd-risoto", quantity: 1 },
-      ],
-      delivery: [
-        { id: `item-${code}-1`, productId: "prd-risoto", quantity: 1 },
-      ],
-    };
-    const tableId =
-      channel === "table"
-        ? data.tables.find((table) => table.status === "free")?.id ?? "table-2"
-        : undefined;
     const order: Order = {
-      id: `ord-${code}`,
+      id: `ord-${Date.now()}`,
       unitId: data.unit.id,
       code,
-      channel,
+      channel: composer.channel,
       status: "new",
       openedAt: now,
-      tableId,
-      customerId: channel === "delivery" ? "cust-victor" : undefined,
-      items: productBundles[channel],
-      deliveryFee: channel === "delivery" ? 8 : 0,
-      discount: 0,
+      tableId: composer.channel === "table" ? composer.tableId : undefined,
+      customerId:
+        composer.channel === "delivery" ? composer.customerId : undefined,
+      items: selectedItems,
+      deliveryFee: Math.max(0, Number(composer.deliveryFee) || 0),
+      discount: Math.max(0, Number(composer.discount) || 0),
       payments: [],
       fiscalStatus: data.unit.fiscalEnabled ? "pending" : "disabled",
-      whatsappStatus: channel === "delivery" ? "queued" : "not_sent",
+      whatsappStatus: composer.channel === "delivery" ? "queued" : "not_sent",
     };
     const stockMovements = reserveStockForOrder(
       order,
@@ -287,7 +360,10 @@ export function SaboreApp({
     setOrders((current) => [order, ...current]);
     setMovements((current) => [...stockMovements, ...current]);
     setLots((current) => deductLotsByMovements(current, stockMovements));
-    log(`Pedido ${code} aberto em ${channelLabel[channel]} com baixa por ficha tecnica`);
+    setComposer(null);
+    log(
+      `Pedido ${code} aberto em ${channelLabel[order.channel]} com ${selectedItems.length} item(ns)`,
+    );
   }
 
   function advanceOrder(orderId: string) {
@@ -488,20 +564,32 @@ export function SaboreApp({
               )}
             </div>
             <div className="grid grid-cols-3 gap-2 sm:flex">
-              <Button onClick={() => createOrder("counter")}>
+              <Button onClick={() => openComposer("counter")}>
                 <Plus />
                 Balcao
               </Button>
-              <Button variant="secondary" onClick={() => createOrder("table")}>
+              <Button variant="secondary" onClick={() => openComposer("table")}>
                 <Table2 />
                 Mesa
               </Button>
-              <Button variant="outline" onClick={() => createOrder("delivery")}>
+              <Button variant="outline" onClick={() => openComposer("delivery")}>
                 <Truck />
                 Delivery
               </Button>
             </div>
           </header>
+
+          {composer && (
+            <OrderComposer
+              composer={composer}
+              data={data}
+              onPatch={patchComposer}
+              onChangeItem={updateComposerItem}
+              onChangeNote={updateComposerNote}
+              onClose={() => setComposer(null)}
+              onSubmit={submitComposer}
+            />
+          )}
 
           {activeView === "overview" && (
             <OverviewView
@@ -751,6 +839,237 @@ function OverviewView({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function OrderComposer({
+  composer,
+  data,
+  onPatch,
+  onChangeItem,
+  onChangeNote,
+  onClose,
+  onSubmit,
+}: {
+  composer: ComposerState;
+  data: SaboreData;
+  onPatch: (patch: Partial<ComposerState>) => void;
+  onChangeItem: (productId: string, delta: number) => void;
+  onChangeNote: (productId: string, note: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const activeProducts = data.products.filter((product) => product.active);
+  const selectedItems = Object.entries(composer.items).filter(
+    ([, quantity]) => quantity > 0,
+  );
+  const subtotal = selectedItems.reduce((sum, [productId, quantity]) => {
+    const product = data.products.find((candidate) => candidate.id === productId);
+
+    return sum + (product?.price ?? 0) * quantity;
+  }, 0);
+  const deliveryFee = Math.max(0, Number(composer.deliveryFee) || 0);
+  const discount = Math.max(0, Number(composer.discount) || 0);
+  const total = Math.max(0, subtotal + deliveryFee - discount);
+
+  return (
+    <Card className="mt-5">
+      <CardHeader className="flex flex-row items-start justify-between gap-4">
+        <div>
+          <CardTitle>Novo pedido {channelLabel[composer.channel]}</CardTitle>
+          <CardDescription>
+            Lance itens, quantidades e destino antes de enviar para a cozinha.
+          </CardDescription>
+        </div>
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={onClose}
+          aria-label="Fechar lancamento"
+        >
+          <X />
+        </Button>
+      </CardHeader>
+      <CardContent className="grid gap-5 xl:grid-cols-[1fr_320px]">
+        <div className="space-y-5">
+          {composer.channel === "table" && (
+            <div>
+              <p className="mb-2 text-sm font-medium">Mesa</p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {data.tables.map((table) => (
+                  <Button
+                    key={table.id}
+                    variant={composer.tableId === table.id ? "secondary" : "outline"}
+                    onClick={() => onPatch({ tableId: table.id })}
+                  >
+                    <Table2 />
+                    {table.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {composer.channel === "delivery" && (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <p className="mb-2 text-sm font-medium">Cliente</p>
+                <div className="grid gap-2">
+                  {data.customers.map((customer) => (
+                    <Button
+                      key={customer.id}
+                      variant={
+                        composer.customerId === customer.id ? "secondary" : "outline"
+                      }
+                      className="justify-start"
+                      onClick={() => onPatch({ customerId: customer.id })}
+                    >
+                      <Truck />
+                      <span className="truncate">{customer.name}</span>
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <MoneyField
+                label="Taxa de entrega"
+                value={composer.deliveryFee}
+                onChange={(deliveryFee) => onPatch({ deliveryFee })}
+              />
+            </div>
+          )}
+
+          <div>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm font-medium">Cardapio</p>
+              <Badge variant="neutral">{activeProducts.length} produtos</Badge>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {activeProducts.map((product) => {
+                const quantity = composer.items[product.id] ?? 0;
+
+                return (
+                  <div
+                    key={product.id}
+                    className="rounded-lg border border-border bg-muted/20 p-4"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="font-medium">{product.name}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {product.category} · {formatCurrency(product.price)}
+                        </p>
+                      </div>
+                      <Badge variant="neutral">{product.preparationArea}</Badge>
+                    </div>
+                    <div className="mt-4 flex items-center gap-2">
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        aria-label={`Remover ${product.name}`}
+                        onClick={() => onChangeItem(product.id, -1)}
+                      >
+                        <Minus />
+                      </Button>
+                      <span className="flex h-9 min-w-10 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-semibold">
+                        {quantity}
+                      </span>
+                      <Button
+                        size="icon"
+                        variant="secondary"
+                        aria-label={`Adicionar ${product.name}`}
+                        onClick={() => onChangeItem(product.id, 1)}
+                      >
+                        <Plus />
+                      </Button>
+                    </div>
+                    {quantity > 0 && (
+                      <input
+                        className="mt-3 h-10 w-full rounded-md border border-border bg-background px-3 text-sm outline-none ring-ring transition focus:ring-2"
+                        placeholder="Observacao do item"
+                        value={composer.notes[product.id] ?? ""}
+                        onChange={(event) =>
+                          onChangeNote(product.id, event.target.value)
+                        }
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-lg border border-border bg-muted/20 p-5">
+            <div className="space-y-1.5">
+              <h3 className="text-base font-semibold leading-none">Resumo</h3>
+              <p className="text-sm leading-6 text-muted-foreground">
+                {selectedItems.length} item(ns) selecionado(s)
+              </p>
+            </div>
+            <div className="mt-5 space-y-3">
+              <div className="space-y-2">
+                {selectedItems.map(([productId, quantity]) => {
+                  const product = data.products.find(
+                    (candidate) => candidate.id === productId,
+                  );
+
+                  return (
+                    <Row
+                      key={productId}
+                      label={`${quantity}x ${product?.name ?? "Produto"}`}
+                      value={formatCurrency((product?.price ?? 0) * quantity)}
+                    />
+                  );
+                })}
+                {selectedItems.length === 0 && (
+                  <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+                    Nenhum item selecionado.
+                  </p>
+                )}
+              </div>
+              <MoneyField
+                label="Desconto"
+                value={composer.discount}
+                onChange={(discountValue) => onPatch({ discount: discountValue })}
+              />
+              <div className="space-y-2 border-t border-border pt-3 text-sm">
+                <Row label="Subtotal" value={formatCurrency(subtotal)} />
+                <Row label="Entrega" value={formatCurrency(deliveryFee)} />
+                <Row label="Desconto" value={formatCurrency(discount)} />
+                <Row label="Total" value={formatCurrency(total)} strong />
+              </div>
+              <Button className="w-full" onClick={onSubmit}>
+                <Send />
+                Abrir pedido
+              </Button>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MoneyField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      {label}
+      <input
+        className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
+        inputMode="decimal"
+        value={value}
+        onChange={(event) => onChange(event.target.value.replace(",", "."))}
+      />
+    </label>
   );
 }
 
