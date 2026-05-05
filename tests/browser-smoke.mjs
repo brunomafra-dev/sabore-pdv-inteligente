@@ -48,6 +48,8 @@ async function verifyMobile(browser) {
     .isVisible();
   await page.getByRole("button", { name: /^Cozinha$/ }).click();
   await page.waitForTimeout(300);
+  await page.getByRole("button", { name: /^Estoque$/ }).click();
+  await page.waitForTimeout(300);
 
   const bodyText = (await page.locator("body").innerText()).trim();
   const textLength = bodyText.length;
@@ -67,6 +69,10 @@ async function verifyMobile(browser) {
     horizontalOverflow,
     composerClearedOnNavigation: !bodyText.includes("Novo pedido Mesa"),
     pizzaBuilderVisible,
+    stockFormsVisible:
+      bodyText.includes("Novo item do cardapio") &&
+      bodyText.includes("Ficha tecnica opcional") &&
+      bodyText.includes("Entrada e baixa manual"),
     errors,
   };
 }
@@ -86,6 +92,7 @@ if (
   mobile.errors.length > 0 ||
   mobile.horizontalOverflow ||
   !mobile.pizzaBuilderVisible ||
+  !mobile.stockFormsVisible ||
   !mobile.composerClearedOnNavigation
 ) {
   console.error(JSON.stringify({ desktop, mobile }, null, 2));

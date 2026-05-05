@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Clock3,
   CreditCard,
+  FilePenLine,
   MessageCircle,
   Minus,
   PackageCheck,
@@ -67,6 +68,8 @@ import type {
   Order,
   OrderStatus,
   PaymentMethod,
+  Product,
+  RecipeItem,
   SaboreData,
   SalesChannel,
 } from "@/lib/types";
@@ -101,6 +104,29 @@ type ComposerState = {
   pizzaBuilder: PizzaBuilderState;
   deliveryFee: string;
   discount: string;
+};
+
+type ProductForm = {
+  name: string;
+  category: string;
+  price: string;
+  preparationArea: Product["preparationArea"];
+};
+
+type RecipeForm = {
+  productId: string;
+  ingredientId: string;
+  quantity: string;
+};
+
+type StockAdjustmentForm = {
+  ingredientId: string;
+  quantity: string;
+  direction: "in" | "out";
+  reason: string;
+  supplier: string;
+  batchCode: string;
+  expiresAt: string;
 };
 
 const statusLabel: Record<OrderStatus, string> = {
@@ -226,6 +252,8 @@ export function SaboreApp({
   const [orders, setOrders] = useState(() => cloneData(initialData.orders));
   const [lots, setLots] = useState(() => cloneData(initialData.lots));
   const [movements, setMovements] = useState(() => cloneData(initialData.movements));
+  const [products, setProducts] = useState(() => cloneData(initialData.products));
+  const [recipe, setRecipe] = useState(() => cloneData(initialData.recipe));
   const [cashSession, setCashSession] = useState<CashSession>(() =>
     cloneData(initialData.cashSession),
   );
@@ -235,8 +263,8 @@ export function SaboreApp({
     "Caixa aberto com R$ 150,00 de fundo",
   ]);
   const data = useMemo(
-    () => ({ ...initialData, orders, lots, movements, cashSession }),
-    [cashSession, initialData, lots, movements, orders],
+    () => ({ ...initialData, orders, lots, movements, products, recipe, cashSession }),
+    [cashSession, initialData, lots, movements, orders, products, recipe],
   );
   const stockPositions = useMemo(
     () => calculateStockPositions(data.ingredients, lots, baseDate),
@@ -692,6 +720,99 @@ export function SaboreApp({
     log("Recebimento de mussarela registrado com lote e validade");
   }
 
+  function addProduct(form: ProductForm) {
+    const price = Math.max(0, Number(form.price) || 0);
+
+    if (!form.name.trim() || price <= 0) {
+      log("Informe nome e preco para cadastrar o item do cardapio");
+      return;
+    }
+
+    const product: Product = {
+      id: `prd-${Date.now()}`,
+      unitId: data.unit.id,
+      name: form.name.trim(),
+      category: form.category.trim() || "Cardapio",
+      price,
+      active: true,
+      preparationArea: form.preparationArea,
+    };
+
+    setProducts((current) => [product, ...current]);
+    log(`${product.name} cadastrado no cardapio`);
+  }
+
+  function addRecipeItem(form: RecipeForm) {
+    const quantity = Math.max(0, Number(form.quantity) || 0);
+    const product = products.find((candidate) => candidate.id === form.productId);
+    const ingredient = data.ingredients.find(
+      (candidate) => candidate.id === form.ingredientId,
+    );
+
+    if (!product || !ingredient || quantity <= 0) {
+      log("Selecione produto, insumo e quantidade para a ficha tecnica");
+      return;
+    }
+
+    const item: RecipeItem = {
+      id: `rec-${Date.now()}`,
+      productId: product.id,
+      ingredientId: ingredient.id,
+      quantity,
+    };
+
+    setRecipe((current) => [item, ...current]);
+    log(
+      `Ficha tecnica: ${quantity} ${ingredient.measure} de ${ingredient.name} em ${product.name}`,
+    );
+  }
+
+  function adjustStock(form: StockAdjustmentForm) {
+    const ingredient = data.ingredients.find(
+      (candidate) => candidate.id === form.ingredientId,
+    );
+    const rawQuantity = Math.max(0, Number(form.quantity) || 0);
+
+    if (!ingredient || rawQuantity <= 0) {
+      log("Selecione um insumo e informe a quantidade do ajuste");
+      return;
+    }
+
+    const signedQuantity = form.direction === "in" ? rawQuantity : -rawQuantity;
+    const reason = form.reason.trim() || (form.direction === "in" ? "compra" : "venda");
+    const movement: InventoryMovement = {
+      id: `mov-manual-${Date.now()}`,
+      unitId: data.unit.id,
+      ingredientId: ingredient.id,
+      type: form.direction === "in" ? "receipt" : "manual_exit",
+      quantity: signedQuantity,
+      costImpact: Math.abs(signedQuantity) * ingredient.averageCost,
+      reason,
+      createdAt: now,
+    };
+
+    if (form.direction === "in") {
+      const lot: InventoryLot = {
+        id: `lot-manual-${Date.now()}`,
+        ingredientId: ingredient.id,
+        supplier: form.supplier.trim() || "Fornecedor manual",
+        batchCode: form.batchCode.trim() || `MAN-${Date.now()}`,
+        quantity: rawQuantity,
+        expiresAt: form.expiresAt || "2026-12-31",
+        receivedAt: now.slice(0, 10),
+      };
+
+      setLots((current) => [lot, ...current]);
+      setMovements((current) => [movement, ...current]);
+      log(`Entrada manual: ${rawQuantity} ${ingredient.measure} de ${ingredient.name}`);
+      return;
+    }
+
+    setMovements((current) => [movement, ...current]);
+    setLots((current) => deductLotsByMovements(current, [movement]));
+    log(`Baixa manual: ${rawQuantity} ${ingredient.measure} de ${ingredient.name} - ${reason}`);
+  }
+
   function closeCash() {
     setCashSession((current) => ({
       ...current,
@@ -863,6 +984,9 @@ export function SaboreApp({
               lots={lots}
               data={data}
               onReceiveStock={receiveStock}
+              onAddProduct={addProduct}
+              onAddRecipeItem={addRecipeItem}
+              onAdjustStock={adjustStock}
             />
           )}
           {activeView === "reports" && (
@@ -1530,6 +1654,33 @@ function MoneyField({
   );
 }
 
+function TextField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  inputMode,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+}) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      {label}
+      <input
+        className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
+        inputMode={inputMode}
+        placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
 function ServiceView({
   orders,
   data,
@@ -1984,12 +2135,58 @@ function StockView({
   lots,
   data,
   onReceiveStock,
+  onAddProduct,
+  onAddRecipeItem,
+  onAdjustStock,
 }: {
   positions: ReturnType<typeof calculateStockPositions>;
   lots: InventoryLot[];
   data: SaboreData;
   onReceiveStock: () => void;
+  onAddProduct: (form: ProductForm) => void;
+  onAddRecipeItem: (form: RecipeForm) => void;
+  onAdjustStock: (form: StockAdjustmentForm) => void;
 }) {
+  const [productForm, setProductForm] = useState<ProductForm>({
+    name: "",
+    category: "Pizzas",
+    price: "",
+    preparationArea: "kitchen",
+  });
+  const [recipeForm, setRecipeForm] = useState<RecipeForm>({
+    productId: data.products.find((product) => product.active)?.id ?? "",
+    ingredientId: data.ingredients[0]?.id ?? "",
+    quantity: "",
+  });
+  const [stockForm, setStockForm] = useState<StockAdjustmentForm>({
+    ingredientId: data.ingredients[0]?.id ?? "",
+    quantity: "",
+    direction: "in",
+    reason: "compra",
+    supplier: "Atacadao AL",
+    batchCode: "",
+    expiresAt: "2026-12-31",
+  });
+  const activeProducts = data.products.filter((product) => product.active);
+  const selectedProductRecipe = data.recipe.filter(
+    (item) => item.productId === recipeForm.productId,
+  );
+
+  function submitProduct() {
+    onAddProduct(productForm);
+    setProductForm((current) => ({ ...current, name: "", price: "" }));
+  }
+
+  function submitRecipeItem() {
+    onAddRecipeItem(recipeForm);
+    setRecipeForm((current) => ({ ...current, quantity: "" }));
+  }
+
+  function submitStockAdjustment() {
+    onAdjustStock(stockForm);
+    setStockForm((current) => ({ ...current, quantity: "", batchCode: "" }));
+  }
+
   return (
     <div className="space-y-5 pt-5">
       <div className="flex justify-end">
@@ -1998,6 +2195,249 @@ function StockView({
           Receber insumo
         </Button>
       </div>
+
+      <div className="grid gap-5 xl:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle>Novo item do cardapio</CardTitle>
+            <CardDescription>Cadastro rapido para colocar produto no PDV.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <TextField
+              label="Nome"
+              value={productForm.name}
+              onChange={(name) => setProductForm((current) => ({ ...current, name }))}
+              placeholder="Pizza brotinho calabresa"
+            />
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              <TextField
+                label="Categoria"
+                value={productForm.category}
+                onChange={(category) =>
+                  setProductForm((current) => ({ ...current, category }))
+                }
+              />
+              <MoneyField
+                label="Preco"
+                value={productForm.price}
+                onChange={(price) =>
+                  setProductForm((current) => ({ ...current, price }))
+                }
+              />
+            </div>
+            <label className="grid gap-2 text-sm font-medium">
+              Praca
+              <select
+                className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
+                value={productForm.preparationArea}
+                onChange={(event) =>
+                  setProductForm((current) => ({
+                    ...current,
+                    preparationArea: event.target.value as Product["preparationArea"],
+                  }))
+                }
+              >
+                <option value="kitchen">Cozinha</option>
+                <option value="bar">Bar</option>
+                <option value="pastry">Confeitaria</option>
+              </select>
+            </label>
+            <Button className="w-full" onClick={submitProduct}>
+              <Plus />
+              Adicionar no PDV
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Ficha tecnica opcional</CardTitle>
+            <CardDescription>Use quando o produto tiver receita controlada.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <label className="grid gap-2 text-sm font-medium">
+              Produto
+              <select
+                className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
+                value={recipeForm.productId}
+                onChange={(event) =>
+                  setRecipeForm((current) => ({
+                    ...current,
+                    productId: event.target.value,
+                  }))
+                }
+              >
+                {activeProducts.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="grid gap-3 sm:grid-cols-[1fr_120px] xl:grid-cols-1">
+              <label className="grid gap-2 text-sm font-medium">
+                Insumo
+                <select
+                  className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
+                  value={recipeForm.ingredientId}
+                  onChange={(event) =>
+                    setRecipeForm((current) => ({
+                      ...current,
+                      ingredientId: event.target.value,
+                    }))
+                  }
+                >
+                  {data.ingredients.map((ingredient) => (
+                    <option key={ingredient.id} value={ingredient.id}>
+                      {ingredient.name} ({ingredient.measure})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <TextField
+                label="Qtd."
+                value={recipeForm.quantity}
+                onChange={(quantity) =>
+                  setRecipeForm((current) => ({ ...current, quantity }))
+                }
+                inputMode="decimal"
+              />
+            </div>
+            <Button className="w-full" variant="secondary" onClick={submitRecipeItem}>
+              <FilePenLine />
+              Adicionar insumo
+            </Button>
+            <div className="rounded-md border border-border bg-muted/20 p-3">
+              <p className="text-xs font-medium uppercase text-muted-foreground">
+                Receita atual
+              </p>
+              <div className="mt-2 space-y-2 text-sm">
+                {selectedProductRecipe.map((item) => {
+                  const ingredient = data.ingredients.find(
+                    (candidate) => candidate.id === item.ingredientId,
+                  );
+
+                  return (
+                    <Row
+                      key={item.id}
+                      label={ingredient?.name ?? "Insumo"}
+                      value={`${item.quantity} ${ingredient?.measure ?? ""}`}
+                    />
+                  );
+                })}
+                {selectedProductRecipe.length === 0 && (
+                  <p className="text-muted-foreground">Sem ficha tecnica cadastrada.</p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Entrada e baixa manual</CardTitle>
+            <CardDescription>Para compra, venda avulsa, perda ou improprio.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <label className="grid gap-2 text-sm font-medium">
+              Insumo
+              <select
+                className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
+                value={stockForm.ingredientId}
+                onChange={(event) =>
+                  setStockForm((current) => ({
+                    ...current,
+                    ingredientId: event.target.value,
+                  }))
+                }
+              >
+                {data.ingredients.map((ingredient) => (
+                  <option key={ingredient.id} value={ingredient.id}>
+                    {ingredient.name} ({ingredient.measure})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant={stockForm.direction === "in" ? "secondary" : "outline"}
+                onClick={() =>
+                  setStockForm((current) => ({
+                    ...current,
+                    direction: "in",
+                    reason: current.reason || "compra",
+                  }))
+                }
+              >
+                Entrada
+              </Button>
+              <Button
+                variant={stockForm.direction === "out" ? "secondary" : "outline"}
+                onClick={() =>
+                  setStockForm((current) => ({
+                    ...current,
+                    direction: "out",
+                    reason: current.reason || "venda",
+                  }))
+                }
+              >
+                Saida
+              </Button>
+            </div>
+            <TextField
+              label="Quantidade"
+              value={stockForm.quantity}
+              onChange={(quantity) =>
+                setStockForm((current) => ({ ...current, quantity }))
+              }
+              inputMode="decimal"
+            />
+            <label className="grid gap-2 text-sm font-medium">
+              Motivo
+              <select
+                className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
+                value={stockForm.reason}
+                onChange={(event) =>
+                  setStockForm((current) => ({
+                    ...current,
+                    reason: event.target.value,
+                  }))
+                }
+              >
+                <option value="compra">Compra / recebimento</option>
+                <option value="venda">Venda manual</option>
+                <option value="improprio">Improprio para consumo</option>
+                <option value="perda">Perda / quebra</option>
+                <option value="contagem">Ajuste de contagem</option>
+              </select>
+            </label>
+            {stockForm.direction === "in" && (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <TextField
+                  label="Fornecedor"
+                  value={stockForm.supplier}
+                  onChange={(supplier) =>
+                    setStockForm((current) => ({ ...current, supplier }))
+                  }
+                />
+                <TextField
+                  label="Validade"
+                  value={stockForm.expiresAt}
+                  onChange={(expiresAt) =>
+                    setStockForm((current) => ({ ...current, expiresAt }))
+                  }
+                  placeholder="2026-12-31"
+                />
+              </div>
+            )}
+            <Button className="w-full" onClick={submitStockAdjustment}>
+              <PackageCheck />
+              Registrar movimento
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {positions.map((position) => (
           <Card key={position.ingredient.id}>
