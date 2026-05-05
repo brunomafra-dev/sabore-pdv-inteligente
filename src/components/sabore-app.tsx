@@ -22,7 +22,6 @@ import {
   Send,
   ShoppingCart,
   Store,
-  Table2,
   Timer,
   Truck,
   WalletCards,
@@ -138,6 +137,30 @@ type TableForm = {
 
 type StockDialog = "movement" | "lots" | null;
 
+const SmallTableIcon = (({
+  className,
+  ...props
+}: React.SVGProps<SVGSVGElement>) => (
+  <svg
+    aria-hidden="true"
+    className={className}
+    fill="none"
+    stroke="currentColor"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    strokeWidth="2"
+    viewBox="0 0 24 24"
+    {...props}
+  >
+    <path d="M8 10h8" />
+    <path d="M6 13h12" />
+    <path d="M8 13l-1 7" />
+    <path d="M16 13l1 7" />
+    <path d="M9 20h6" />
+    <path d="M9 10l1-4h4l1 4" />
+  </svg>
+)) as LucideIcon;
+
 const statusLabel: Record<OrderStatus, string> = {
   new: "Fila",
   preparing: "Em preparo",
@@ -173,7 +196,7 @@ const navItems: Array<{
 }> = [
   { id: "overview", label: "Painel", icon: Store },
   { id: "service", label: "Atendimento", icon: ShoppingCart },
-  { id: "tables", label: "Mesas", icon: Table2 },
+  { id: "tables", label: "Mesas", icon: SmallTableIcon },
   { id: "delivery", label: "Delivery", icon: Truck },
   { id: "kitchen", label: "Cozinha", icon: ChefHat },
   { id: "catalog", label: "Cadastro", icon: PanelsTopLeft },
@@ -953,7 +976,7 @@ export function SaboreApp({
                 Atendimento
               </Button>
               <Button variant="secondary" onClick={() => changeView("tables")}>
-                <Table2 />
+                <SmallTableIcon />
                 Mesas
               </Button>
               <Button variant="outline" onClick={() => changeView("delivery")}>
@@ -1383,7 +1406,7 @@ function OrderComposer({
                       }
                       onClick={() => onPatch({ tableId: table.id })}
                     >
-                      <Table2 />
+                      <SmallTableIcon />
                       {table.label}
                     </Button>
                   ))}
@@ -1771,7 +1794,7 @@ function ServiceView({
           label="Mesas em consumo"
           value={String(tableOrders.length)}
           helper="Mesas abertas aguardando itens, preparo ou fechamento."
-          icon={Table2}
+          icon={SmallTableIcon}
         />
         <MetricCard
           label="Ticket em atendimento"
@@ -1958,7 +1981,7 @@ function TablesView({
                     disabled={!isAvailable}
                     onClick={() => onOpenTable(table.id)}
                   >
-                    <Table2 />
+                    <SmallTableIcon />
                     Abrir mesa
                   </Button>
                 )}
@@ -2400,7 +2423,7 @@ function CatalogView({
               inputMode="numeric"
             />
             <Button className="w-full" onClick={submitTable}>
-              <Table2 />
+              <SmallTableIcon />
               Cadastrar mesa
             </Button>
             <div className="rounded-md border border-border bg-muted/20 p-3 text-sm">
