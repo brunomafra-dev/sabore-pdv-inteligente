@@ -38,6 +38,18 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  buildPizzaItem,
+  calculatePizzaPrice,
+  createDefaultPizzaBuilder,
+  getPizzaSize,
+  getPizzaTopping,
+  pizzaFlavors,
+  pizzaSizes,
+  pizzaToppings,
+  type PizzaBuilderState,
+  type PizzaSizeId,
+} from "@/lib/pizza-menu";
+import {
   calculateKitchenCounts,
   calculateOrderTotals,
   calculateRecipeCost,
@@ -69,6 +81,15 @@ type View =
   | "reports"
   | "integrations";
 
+type ComposerCustomItem = {
+  id: string;
+  productId: string;
+  name: string;
+  unitPrice: number;
+  quantity: number;
+  notes?: string;
+};
+
 type ComposerState = {
   channel: SalesChannel;
   existingOrderId?: string;
@@ -76,6 +97,8 @@ type ComposerState = {
   customerId: string;
   items: Record<string, number>;
   notes: Record<string, string>;
+  customItems: ComposerCustomItem[];
+  pizzaBuilder: PizzaBuilderState;
   deliveryFee: string;
   discount: string;
 };
@@ -208,7 +231,7 @@ export function SaboreApp({
   );
   const [composer, setComposer] = useState<ComposerState | null>(null);
   const [activity, setActivity] = useState<string[]>([
-    "Sabore iniciado com operacao demo em Ponta Verde",
+    "Sabore iniciado com pizzaria demo em Ponta Verde",
     "Caixa aberto com R$ 150,00 de fundo",
   ]);
   const data = useMemo(
@@ -221,9 +244,11 @@ export function SaboreApp({
   );
   const recipeCosts = useMemo(
     () =>
-      data.products.map((product) =>
-        calculateRecipeCost(product, data.ingredients, data.recipe),
-      ),
+      data.products
+        .filter((product) => product.active)
+        .map((product) =>
+          calculateRecipeCost(product, data.ingredients, data.recipe),
+        ),
     [data.ingredients, data.products, data.recipe],
   );
   const kitchenCounts = useMemo(() => calculateKitchenCounts(orders), [orders]);
@@ -287,6 +312,8 @@ export function SaboreApp({
         (channel === "delivery" ? data.customers[0]?.id ?? "" : ""),
       items: { ...emptyComposerItems },
       notes: { ...emptyComposerNotes },
+      customItems: [],
+      pizzaBuilder: createDefaultPizzaBuilder(),
       deliveryFee: channel === "delivery" ? "8" : "0",
       discount: "0",
     });
@@ -319,6 +346,103 @@ export function SaboreApp({
     );
   }
 
+  function patchPizzaBuilder(patch: Partial<PizzaBuilderState>) {
+    setComposer((current) =>
+      current
+        ? {
+            ...current,
+            pizzaBuilder: { ...current.pizzaBuilder, ...patch },
+          }
+        : current,
+    );
+  }
+
+  function togglePizzaFlavor(flavorId: string) {
+    setComposer((current) => {
+      if (!current) return current;
+
+      const selected = current.pizzaBuilder.flavorIds.includes(flavorId);
+      let flavorIds = current.pizzaBuilder.flavorIds;
+
+      if (selected) {
+        flavorIds =
+          flavorIds.length > 1
+            ? flavorIds.filter((candidate) => candidate !== flavorId)
+            : flavorIds;
+      } else if (flavorIds.length < 2) {
+        flavorIds = [...flavorIds, flavorId];
+      }
+
+      return {
+        ...current,
+        pizzaBuilder: { ...current.pizzaBuilder, flavorIds },
+      };
+    });
+  }
+
+  function togglePizzaTopping(toppingId: string) {
+    setComposer((current) => {
+      if (!current) return current;
+
+      const selected = current.pizzaBuilder.toppingIds.includes(toppingId);
+      const topping = getPizzaTopping(toppingId);
+      let toppingIds = selected
+        ? current.pizzaBuilder.toppingIds.filter(
+            (candidate) => candidate !== toppingId,
+          )
+        : [...current.pizzaBuilder.toppingIds, toppingId];
+
+      if (!selected && topping?.type === "borda") {
+        toppingIds = [
+          ...current.pizzaBuilder.toppingIds.filter((candidate) => {
+            const existing = getPizzaTopping(candidate);
+
+            return existing?.type !== "borda";
+          }),
+          toppingId,
+        ];
+      }
+
+      return {
+        ...current,
+        pizzaBuilder: { ...current.pizzaBuilder, toppingIds },
+      };
+    });
+  }
+
+  function addPizzaToComposer() {
+    setComposer((current) => {
+      if (!current) return current;
+
+      const pizzaItem = buildPizzaItem(current.pizzaBuilder, data.products);
+
+      if (!pizzaItem) return current;
+
+      return {
+        ...current,
+        customItems: [
+          ...current.customItems,
+          {
+            id: `pizza-${Date.now()}`,
+            quantity: 1,
+            ...pizzaItem,
+          },
+        ],
+      };
+    });
+  }
+
+  function removeCustomItem(itemId: string) {
+    setComposer((current) =>
+      current
+        ? {
+            ...current,
+            customItems: current.customItems.filter((item) => item.id !== itemId),
+          }
+        : current,
+    );
+  }
+
   function patchComposer(patch: Partial<ComposerState>) {
     setComposer((current) => (current ? { ...current, ...patch } : current));
   }
@@ -326,7 +450,7 @@ export function SaboreApp({
   function submitComposer() {
     if (!composer) return;
 
-    const selectedItems = Object.entries(composer.items)
+    const catalogItems = Object.entries(composer.items)
       .filter(([, quantity]) => quantity > 0)
       .map(([productId, quantity], index) => ({
         id: `item-${Date.now()}-${index}`,
@@ -334,6 +458,15 @@ export function SaboreApp({
         quantity,
         notes: composer.notes[productId]?.trim() || undefined,
       }));
+    const customItems = composer.customItems.map((item, index) => ({
+      id: `item-${Date.now()}-custom-${index}`,
+      productId: item.productId,
+      quantity: item.quantity,
+      notes: item.notes,
+      name: item.name,
+      unitPrice: item.unitPrice,
+    }));
+    const selectedItems = [...catalogItems, ...customItems];
 
     if (selectedItems.length === 0) {
       log("Selecione pelo menos um item antes de abrir o pedido");
@@ -535,28 +668,28 @@ export function SaboreApp({
 
   function receiveStock() {
     const lot: InventoryLot = {
-      id: `lot-camarao-${Date.now()}`,
-      ingredientId: "ing-camarao",
-      supplier: "Costa Sul",
-      batchCode: "CAM-0503",
-      quantity: 5,
-      expiresAt: "2026-05-09",
+      id: `lot-mussarela-${Date.now()}`,
+      ingredientId: "ing-mussarela",
+      supplier: "Laticinio Sertao",
+      batchCode: "MUS-0503",
+      quantity: 10,
+      expiresAt: "2026-05-10",
       receivedAt: "2026-05-03",
     };
     const movement: InventoryMovement = {
       id: `mov-receipt-${Date.now()}`,
       unitId: data.unit.id,
-      ingredientId: "ing-camarao",
+      ingredientId: "ing-mussarela",
       type: "receipt",
-      quantity: 5,
-      costImpact: 290,
-      reason: "Recebimento emergencial de camarao",
+      quantity: 10,
+      costImpact: 340,
+      reason: "Recebimento emergencial de mussarela",
       createdAt: now,
     };
 
     setLots((current) => [lot, ...current]);
     setMovements((current) => [movement, ...current]);
-    log("Recebimento de camarao registrado com lote e validade");
+    log("Recebimento de mussarela registrado com lote e validade");
   }
 
   function closeCash() {
@@ -659,6 +792,11 @@ export function SaboreApp({
               onPatch={patchComposer}
               onChangeItem={updateComposerItem}
               onChangeNote={updateComposerNote}
+              onPatchPizzaBuilder={patchPizzaBuilder}
+              onTogglePizzaFlavor={togglePizzaFlavor}
+              onTogglePizzaTopping={togglePizzaTopping}
+              onAddPizza={addPizzaToComposer}
+              onRemoveCustomItem={removeCustomItem}
               onClose={() => setComposer(null)}
               onSubmit={submitComposer}
             />
@@ -949,6 +1087,11 @@ function OrderComposer({
   onPatch,
   onChangeItem,
   onChangeNote,
+  onPatchPizzaBuilder,
+  onTogglePizzaFlavor,
+  onTogglePizzaTopping,
+  onAddPizza,
+  onRemoveCustomItem,
   onClose,
   onSubmit,
 }: {
@@ -957,21 +1100,44 @@ function OrderComposer({
   onPatch: (patch: Partial<ComposerState>) => void;
   onChangeItem: (productId: string, delta: number) => void;
   onChangeNote: (productId: string, note: string) => void;
+  onPatchPizzaBuilder: (patch: Partial<PizzaBuilderState>) => void;
+  onTogglePizzaFlavor: (flavorId: string) => void;
+  onTogglePizzaTopping: (toppingId: string) => void;
+  onAddPizza: () => void;
+  onRemoveCustomItem: (itemId: string) => void;
   onClose: () => void;
   onSubmit: () => void;
 }) {
-  const activeProducts = data.products.filter((product) => product.active);
-  const selectedItems = Object.entries(composer.items).filter(
+  const activeProducts = data.products.filter(
+    (product) => product.active && product.category !== "Pizzas",
+  );
+  const selectedCatalogItems = Object.entries(composer.items).filter(
     ([, quantity]) => quantity > 0,
   );
-  const subtotal = selectedItems.reduce((sum, [productId, quantity]) => {
+  const catalogSubtotal = selectedCatalogItems.reduce((sum, [productId, quantity]) => {
     const product = data.products.find((candidate) => candidate.id === productId);
 
     return sum + (product?.price ?? 0) * quantity;
   }, 0);
+  const customSubtotal = composer.customItems.reduce(
+    (sum, item) => sum + item.unitPrice * item.quantity,
+    0,
+  );
+  const subtotal = catalogSubtotal + customSubtotal;
   const deliveryFee = Math.max(0, Number(composer.deliveryFee) || 0);
   const discount = Math.max(0, Number(composer.discount) || 0);
   const total = Math.max(0, subtotal + deliveryFee - discount);
+  const selectedCount = selectedCatalogItems.length + composer.customItems.length;
+  const pizzaSize = getPizzaSize(composer.pizzaBuilder.sizeId);
+  const pizzaPreview = buildPizzaItem(composer.pizzaBuilder, data.products);
+  const pizzaBasePrice = composer.pizzaBuilder.flavorIds.length
+    ? calculatePizzaPrice({ ...composer.pizzaBuilder, toppingIds: [] })
+    : 0;
+  const pizzaToppingsPrice = composer.pizzaBuilder.toppingIds.reduce(
+    (sum, toppingId) =>
+      sum + (getPizzaTopping(toppingId)?.prices[composer.pizzaBuilder.sizeId] ?? 0),
+    0,
+  );
   const selectedTable = composer.tableId
     ? data.tables.find((table) => table.id === composer.tableId)
     : undefined;
@@ -1066,6 +1232,137 @@ function OrderComposer({
             </div>
           )}
 
+          <div className="rounded-lg border border-border bg-muted/20 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm font-medium">Monte sua pizza</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Escolha tamanho, ate 2 sabores e adicionais. O preco atualiza na hora.
+                </p>
+              </div>
+              <Badge variant="warning">
+                {pizzaSize.label} - {pizzaSize.diameter} - {pizzaSize.slices} fatias
+              </Badge>
+            </div>
+
+            <div className="mt-4 grid gap-4">
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">
+                  Tamanho
+                </p>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {pizzaSizes.map((size) => (
+                    <Button
+                      key={size.id}
+                      variant={
+                        composer.pizzaBuilder.sizeId === size.id ? "secondary" : "outline"
+                      }
+                      onClick={() =>
+                        onPatchPizzaBuilder({ sizeId: size.id as PizzaSizeId })
+                      }
+                    >
+                      {size.label}
+                      <span className="text-xs font-normal">{size.diameter}</span>
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-xs font-medium uppercase text-muted-foreground">
+                    Sabores
+                  </p>
+                  <Badge variant="neutral">
+                    {composer.pizzaBuilder.flavorIds.length}/2 selecionados
+                  </Badge>
+                </div>
+                <div className="grid gap-2 lg:grid-cols-2">
+                  {pizzaFlavors.map((flavor) => {
+                    const selected = composer.pizzaBuilder.flavorIds.includes(
+                      flavor.id,
+                    );
+                    const limitReached =
+                      composer.pizzaBuilder.flavorIds.length >= 2 && !selected;
+
+                    return (
+                      <button
+                        key={flavor.id}
+                        type="button"
+                        disabled={limitReached}
+                        className={cn(
+                          "rounded-md border border-border bg-background p-3 text-left text-sm transition hover:bg-accent disabled:opacity-50",
+                          selected && "border-primary bg-primary/10",
+                        )}
+                        onClick={() => onTogglePizzaFlavor(flavor.id)}
+                      >
+                        <span className="flex items-start justify-between gap-3">
+                          <span className="font-medium">{flavor.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatCurrency(flavor.prices[composer.pizzaBuilder.sizeId])}
+                          </span>
+                        </span>
+                        <span className="mt-1 block leading-5 text-muted-foreground">
+                          {flavor.ingredients}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">
+                  Bordas e extras
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {pizzaToppings.map((topping) => {
+                    const selected = composer.pizzaBuilder.toppingIds.includes(
+                      topping.id,
+                    );
+
+                    return (
+                      <Button
+                        key={topping.id}
+                        variant={selected ? "secondary" : "outline"}
+                        className="justify-between"
+                        onClick={() => onTogglePizzaTopping(topping.id)}
+                      >
+                        <span>{topping.name}</span>
+                        <span className="text-xs font-normal">
+                          +{formatCurrency(topping.prices[composer.pizzaBuilder.sizeId])}
+                        </span>
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border bg-background p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium">
+                      {pizzaPreview?.name ?? "Escolha pelo menos 1 sabor"}
+                    </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Base {formatCurrency(pizzaBasePrice)} - adicionais{" "}
+                      {formatCurrency(pizzaToppingsPrice)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <p className="text-lg font-semibold">
+                      {formatCurrency(pizzaPreview?.unitPrice ?? 0)}
+                    </p>
+                    <Button disabled={!pizzaPreview} onClick={onAddPizza}>
+                      <Plus />
+                      Adicionar pizza
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div>
             <div className="mb-3 flex items-center justify-between gap-3">
               <p className="text-sm font-medium">Cardapio</p>
@@ -1132,12 +1429,12 @@ function OrderComposer({
             <div className="space-y-1.5">
               <h3 className="text-base font-semibold leading-none">Resumo</h3>
               <p className="text-sm leading-6 text-muted-foreground">
-                {selectedItems.length} item(ns) selecionado(s)
+                {selectedCount} item(ns) selecionado(s)
               </p>
             </div>
             <div className="mt-5 space-y-3">
               <div className="space-y-2">
-                {selectedItems.map(([productId, quantity]) => {
+                {selectedCatalogItems.map(([productId, quantity]) => {
                   const product = data.products.find(
                     (candidate) => candidate.id === productId,
                   );
@@ -1150,7 +1447,33 @@ function OrderComposer({
                     />
                   );
                 })}
-                {selectedItems.length === 0 && (
+                {composer.customItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-start justify-between gap-3 rounded-md border border-border bg-background p-3 text-sm"
+                  >
+                    <div>
+                      <p className="font-medium">{item.quantity}x {item.name}</p>
+                      {item.notes && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {item.notes}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span>{formatCurrency(item.unitPrice * item.quantity)}</span>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        aria-label={`Remover ${item.name}`}
+                        onClick={() => onRemoveCustomItem(item.id)}
+                      >
+                        <X />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {selectedCount === 0 && (
                   <p className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
                     Nenhum item selecionado.
                   </p>

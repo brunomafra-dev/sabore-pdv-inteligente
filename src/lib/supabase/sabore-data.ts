@@ -121,6 +121,11 @@ function mapOrder(
       productId: stringValue(item, "product_id"),
       quantity: numberValue(item, "quantity", 1),
       notes: optionalString(item, "notes"),
+      name: optionalString(item, "custom_name"),
+      unitPrice:
+        item.unit_price === null || item.unit_price === undefined
+          ? undefined
+          : numberValue(item, "unit_price"),
     })),
     payments: (paymentsByOrder[orderId] ?? []).map<Payment>((payment) => ({
       id: stringValue(payment, "id"),

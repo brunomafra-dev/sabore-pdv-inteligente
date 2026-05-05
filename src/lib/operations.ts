@@ -46,15 +46,20 @@ export interface CashClosing {
   expectedDrawer: number;
 }
 
+function getItemUnitPrice(item: OrderItem, products: Product[]) {
+  const product = products.find((candidate) => candidate.id === item.productId);
+
+  return item.unitPrice ?? product?.price ?? 0;
+}
+
 export function calculateOrderTotals(
   order: Order,
   products: Product[],
 ): OrderTotals {
-  const subtotal = order.items.reduce((sum, item) => {
-    const product = products.find((candidate) => candidate.id === item.productId);
-
-    return sum + (product?.price ?? 0) * item.quantity;
-  }, 0);
+  const subtotal = order.items.reduce(
+    (sum, item) => sum + getItemUnitPrice(item, products) * item.quantity,
+    0,
+  );
   const total = Math.max(0, subtotal + order.deliveryFee - order.discount);
   const paid = order.payments.reduce((sum, payment) => sum + payment.amount, 0);
 
@@ -220,6 +225,7 @@ export function closeCashSession(
 
 export function getItemLabel(item: OrderItem, products: Product[]) {
   const product = products.find((candidate) => candidate.id === item.productId);
+  const name = item.name ?? product?.name ?? "Produto";
 
-  return product ? `${item.quantity}x ${product.name}` : `${item.quantity}x Produto`;
+  return `${item.quantity}x ${name}`;
 }

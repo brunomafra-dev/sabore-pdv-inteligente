@@ -12,17 +12,18 @@ async function verifyDesktop(browser) {
   page.on("pageerror", (error) => errors.push(error.message));
 
   await page.goto(baseUrl, { waitUntil: "networkidle" });
+  const callToAction = await page.getByRole("link", { name: /ver demonstracao/i }).count();
 
   const textLength = (await page.locator("body").innerText()).trim().length;
   const overlay = await page
     .locator("[data-nextjs-dialog], .vite-error-overlay, #webpack-dev-server-client-overlay")
     .count();
-  const buttons = await page.locator("button").count();
+  const buttons = await page.locator("button, a").count();
 
-  await page.screenshot({ path: ".next/sabore-home.png", fullPage: true });
+  await page.screenshot({ path: ".next/sabore-landing.png", fullPage: true });
   await page.close();
 
-  return { textLength, overlay, buttons, errors };
+  return { textLength, overlay, buttons, callToAction, errors };
 }
 
 async function verifyMobile(browser) {
@@ -37,9 +38,14 @@ async function verifyMobile(browser) {
   });
   page.on("pageerror", (error) => errors.push(error.message));
 
-  await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.goto(`${baseUrl}/app`, { waitUntil: "networkidle" });
   await page.getByRole("button", { name: /^Mesas$/ }).first().click();
   await page.getByRole("button", { name: /^Abrir mesa$/ }).first().click();
+  await page.waitForTimeout(300);
+  const pizzaBuilderVisible = await page
+    .getByText(/Monte sua pizza/i)
+    .first()
+    .isVisible();
   await page.getByRole("button", { name: /^Cozinha$/ }).click();
   await page.waitForTimeout(300);
 
@@ -60,6 +66,7 @@ async function verifyMobile(browser) {
     overlay,
     horizontalOverflow,
     composerClearedOnNavigation: !bodyText.includes("Novo pedido Mesa"),
+    pizzaBuilderVisible,
     errors,
   };
 }
@@ -71,12 +78,14 @@ await browser.close();
 
 if (
   desktop.textLength === 0 ||
+  desktop.callToAction === 0 ||
   mobile.textLength === 0 ||
   desktop.overlay > 0 ||
   mobile.overlay > 0 ||
   desktop.errors.length > 0 ||
   mobile.errors.length > 0 ||
   mobile.horizontalOverflow ||
+  !mobile.pizzaBuilderVisible ||
   !mobile.composerClearedOnNavigation
 ) {
   console.error(JSON.stringify({ desktop, mobile }, null, 2));

@@ -15,21 +15,21 @@ test("calculates order totals with delivery, discount and remaining amount", () 
 
   const totals = calculateOrderTotals(order, demoData.products);
 
-  assert.equal(totals.subtotal, 80);
+  assert.equal(totals.subtotal, 126);
   assert.equal(totals.deliveryFee, 8);
   assert.equal(totals.discount, 5);
-  assert.equal(totals.total, 83);
-  assert.equal(totals.remaining, 83);
+  assert.equal(totals.total, 129);
+  assert.equal(totals.remaining, 129);
 });
 
 test("calculates recipe CMV from ficha tecnica", () => {
-  const product = demoData.products.find((candidate) => candidate.id === "prd-risoto");
+  const product = demoData.products.find((candidate) => candidate.id === "prd-pizza-grande");
   assert.ok(product);
 
   const cost = calculateRecipeCost(product, demoData.ingredients, demoData.recipe);
 
-  assert.equal(Number(cost.cost.toFixed(2)), 12.69);
-  assert.equal(Number(cost.cmv.toFixed(4)), 0.2266);
+  assert.equal(Number(cost.cost.toFixed(2)), 18.48);
+  assert.equal(Number(cost.cmv.toFixed(4)), 0.2981);
 });
 
 test("generates stock movements for an order using recipe quantities", () => {
@@ -42,11 +42,13 @@ test("generates stock movements for an order using recipe quantities", () => {
     demoData.ingredients,
     "2026-05-03T12:00:00-03:00",
   );
-  const salmon = movements.find((movement) => movement.ingredientId === "ing-salmao");
+  const cheese = movements.find(
+    (movement) => movement.ingredientId === "ing-mussarela",
+  );
 
-  assert.ok(salmon);
-  assert.equal(salmon.quantity, -0.32);
-  assert.equal(Number(salmon.costImpact.toFixed(2)), 23.04);
+  assert.ok(cheese);
+  assert.equal(cheese.quantity, -0.42);
+  assert.equal(Number(cheese.costImpact.toFixed(2)), 14.28);
 });
 
 test("flags low stock and near expiry lots", () => {
@@ -55,11 +57,11 @@ test("flags low stock and near expiry lots", () => {
     demoData.lots,
     new Date("2026-05-03T12:00:00-03:00"),
   );
-  const shrimp = positions.find((position) => position.ingredient.id === "ing-camarao");
+  const cheese = positions.find((position) => position.ingredient.id === "ing-mussarela");
 
-  assert.ok(shrimp);
-  assert.equal(shrimp.status, "low");
-  assert.equal(shrimp.closestExpiryDays, 1);
+  assert.ok(cheese);
+  assert.equal(cheese.status, "low");
+  assert.equal(cheese.closestExpiryDays, 3);
 });
 
 test("closes cash session by payment method", () => {
@@ -70,7 +72,7 @@ test("closes cash session by payment method", () => {
     demoData.products,
   );
 
-  assert.equal(closing.salesTotal, 56);
-  assert.equal(closing.byMethod.pix, 56);
+  assert.equal(closing.salesTotal, 54.5);
+  assert.equal(closing.byMethod.pix, 54.5);
   assert.equal(closing.expectedDrawer, 150);
 });

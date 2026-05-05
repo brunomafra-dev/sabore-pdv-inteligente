@@ -109,6 +109,8 @@ create table public.order_items (
   order_id uuid not null references public.orders(id) on delete cascade,
   product_id uuid not null references public.products(id) on delete restrict,
   quantity numeric(10,2) not null check (quantity > 0),
+  custom_name text,
+  unit_price numeric(10,2),
   notes text
 );
 

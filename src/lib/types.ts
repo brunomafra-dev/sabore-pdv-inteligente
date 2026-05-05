@@ -109,6 +109,8 @@ export interface OrderItem {
   productId: string;
   quantity: number;
   notes?: string;
+  name?: string;
+  unitPrice?: number;
 }
 
 export interface Payment {
