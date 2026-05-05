@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -14,6 +14,7 @@ import {
   FilePenLine,
   MessageCircle,
   Minus,
+  PanelsTopLeft,
   PackageCheck,
   Plus,
   ReceiptText,
@@ -80,6 +81,7 @@ type View =
   | "tables"
   | "delivery"
   | "kitchen"
+  | "catalog"
   | "stock"
   | "reports"
   | "integrations";
@@ -129,6 +131,13 @@ type StockAdjustmentForm = {
   expiresAt: string;
 };
 
+type TableForm = {
+  label: string;
+  seats: string;
+};
+
+type StockDialog = "movement" | "lots" | null;
+
 const statusLabel: Record<OrderStatus, string> = {
   new: "Fila",
   preparing: "Em preparo",
@@ -153,8 +162,9 @@ const paymentLabel: Record<PaymentMethod, string> = {
   online: "Online",
 };
 
-const now = "2026-05-03T12:10:00-03:00";
-const baseDate = new Date(now);
+function getCurrentIso() {
+  return new Date().toISOString();
+}
 
 const navItems: Array<{
   id: View;
@@ -166,6 +176,7 @@ const navItems: Array<{
   { id: "tables", label: "Mesas", icon: Table2 },
   { id: "delivery", label: "Delivery", icon: Truck },
   { id: "kitchen", label: "Cozinha", icon: ChefHat },
+  { id: "catalog", label: "Cadastro", icon: PanelsTopLeft },
   { id: "stock", label: "Estoque", icon: PackageCheck },
   { id: "reports", label: "Relatorios", icon: BarChart3 },
   { id: "integrations", label: "Integracoes", icon: ReceiptText },
@@ -197,7 +208,7 @@ function kitchenActionLabel(status: OrderStatus) {
   return labels[status] ?? "Avancar";
 }
 
-function minutesSince(isoDate: string, baseIso = now) {
+function minutesSince(isoDate: string, baseIso = getCurrentIso()) {
   const start = new Date(isoDate).getTime();
   const end = new Date(baseIso).getTime();
 
@@ -249,11 +260,14 @@ export function SaboreApp({
   dataSource?: { source: "supabase" | "demo"; message: string };
 }) {
   const [activeView, setActiveView] = useState<View>("overview");
+  const [stockDialog, setStockDialog] = useState<StockDialog>(null);
   const [orders, setOrders] = useState(() => cloneData(initialData.orders));
   const [lots, setLots] = useState(() => cloneData(initialData.lots));
   const [movements, setMovements] = useState(() => cloneData(initialData.movements));
   const [products, setProducts] = useState(() => cloneData(initialData.products));
   const [recipe, setRecipe] = useState(() => cloneData(initialData.recipe));
+  const [tables, setTables] = useState(() => cloneData(initialData.tables));
+  const [clockIso, setClockIso] = useState(() => getCurrentIso());
   const [cashSession, setCashSession] = useState<CashSession>(() =>
     cloneData(initialData.cashSession),
   );
@@ -262,13 +276,27 @@ export function SaboreApp({
     "Sabore iniciado com pizzaria demo em Ponta Verde",
     "Caixa aberto com R$ 150,00 de fundo",
   ]);
+  useEffect(() => {
+    const interval = window.setInterval(() => setClockIso(getCurrentIso()), 10_000);
+
+    return () => window.clearInterval(interval);
+  }, []);
   const data = useMemo(
-    () => ({ ...initialData, orders, lots, movements, products, recipe, cashSession }),
-    [cashSession, initialData, lots, movements, orders, products, recipe],
+    () => ({
+      ...initialData,
+      orders,
+      lots,
+      movements,
+      products,
+      recipe,
+      tables,
+      cashSession,
+    }),
+    [cashSession, initialData, lots, movements, orders, products, recipe, tables],
   );
   const stockPositions = useMemo(
-    () => calculateStockPositions(data.ingredients, lots, baseDate),
-    [data.ingredients, lots],
+    () => calculateStockPositions(data.ingredients, lots, new Date(clockIso)),
+    [clockIso, data.ingredients, lots],
   );
   const recipeCosts = useMemo(
     () =>
@@ -307,8 +335,16 @@ export function SaboreApp({
     setActivity((current) => [message, ...current].slice(0, 6));
   }
 
+  function timestamp() {
+    const iso = getCurrentIso();
+    setClockIso(iso);
+
+    return iso;
+  }
+
   function changeView(view: View) {
     setComposer(null);
+    setStockDialog(null);
     setActiveView(view);
   }
 
@@ -521,6 +557,7 @@ export function SaboreApp({
         return;
       }
 
+      const createdAt = timestamp();
       const stockMovements = reserveStockForOrder(
         {
           ...existingOrder,
@@ -529,7 +566,7 @@ export function SaboreApp({
         },
         data.recipe,
         data.ingredients,
-        now,
+        createdAt,
       ).map((movement) => ({
         ...movement,
         id: `${movement.id}-${Date.now()}`,
@@ -560,7 +597,7 @@ export function SaboreApp({
       code,
       channel: composer.channel,
       status: "new",
-      openedAt: now,
+      openedAt: timestamp(),
       tableId: composer.channel === "table" ? composer.tableId : undefined,
       customerId:
         composer.channel === "delivery" ? composer.customerId : undefined,
@@ -575,10 +612,17 @@ export function SaboreApp({
       order,
       data.recipe,
       data.ingredients,
-      now,
+      order.openedAt,
     );
 
     setOrders((current) => [order, ...current]);
+    if (order.channel === "table" && order.tableId) {
+      setTables((current) =>
+        current.map((table) =>
+          table.id === order.tableId ? { ...table, status: "open" } : table,
+        ),
+      );
+    }
     setMovements((current) => [...stockMovements, ...current]);
     setLots((current) => deductLotsByMovements(current, stockMovements));
     setComposer(null);
@@ -618,13 +662,21 @@ export function SaboreApp({
               id: `pay-${order.code}-${method}`,
               method,
               amount: totals.remaining,
-              receivedAt: now,
+              receivedAt: timestamp(),
             },
           ],
         };
       }),
     );
     const order = orders.find((candidate) => candidate.id === orderId);
+
+    if (order?.tableId) {
+      setTables((current) =>
+        current.map((table) =>
+          table.id === order.tableId ? { ...table, status: "free" } : table,
+        ),
+      );
+    }
 
     if (order) log(`Pagamento ${paymentLabel[method]} registrado no pedido ${order.code}`);
   }
@@ -655,7 +707,7 @@ export function SaboreApp({
                     id: `pay-${order.code}-final`,
                     method: "cash",
                     amount: totals.remaining,
-                    receivedAt: now,
+                    receivedAt: timestamp(),
                   },
                 ]
               : order.payments,
@@ -663,6 +715,14 @@ export function SaboreApp({
       }),
     );
     const order = orders.find((candidate) => candidate.id === orderId);
+
+    if (order?.tableId) {
+      setTables((current) =>
+        current.map((table) =>
+          table.id === order.tableId ? { ...table, status: "free" } : table,
+        ),
+      );
+    }
 
     if (order) log(`Mesa/pedido ${order.code} finalizado no caixa`);
   }
@@ -692,32 +752,6 @@ export function SaboreApp({
       ),
     );
     log(`WhatsApp de status enviado para pedido ${order.code}`);
-  }
-
-  function receiveStock() {
-    const lot: InventoryLot = {
-      id: `lot-mussarela-${Date.now()}`,
-      ingredientId: "ing-mussarela",
-      supplier: "Laticinio Sertao",
-      batchCode: "MUS-0503",
-      quantity: 10,
-      expiresAt: "2026-05-10",
-      receivedAt: "2026-05-03",
-    };
-    const movement: InventoryMovement = {
-      id: `mov-receipt-${Date.now()}`,
-      unitId: data.unit.id,
-      ingredientId: "ing-mussarela",
-      type: "receipt",
-      quantity: 10,
-      costImpact: 340,
-      reason: "Recebimento emergencial de mussarela",
-      createdAt: now,
-    };
-
-    setLots((current) => [lot, ...current]);
-    setMovements((current) => [movement, ...current]);
-    log("Recebimento de mussarela registrado com lote e validade");
   }
 
   function addProduct(form: ProductForm) {
@@ -768,6 +802,7 @@ export function SaboreApp({
   }
 
   function adjustStock(form: StockAdjustmentForm) {
+    const createdAt = timestamp();
     const ingredient = data.ingredients.find(
       (candidate) => candidate.id === form.ingredientId,
     );
@@ -775,7 +810,7 @@ export function SaboreApp({
 
     if (!ingredient || rawQuantity <= 0) {
       log("Selecione um insumo e informe a quantidade do ajuste");
-      return;
+      return false;
     }
 
     const signedQuantity = form.direction === "in" ? rawQuantity : -rawQuantity;
@@ -788,7 +823,7 @@ export function SaboreApp({
       quantity: signedQuantity,
       costImpact: Math.abs(signedQuantity) * ingredient.averageCost,
       reason,
-      createdAt: now,
+      createdAt,
     };
 
     if (form.direction === "in") {
@@ -799,18 +834,40 @@ export function SaboreApp({
         batchCode: form.batchCode.trim() || `MAN-${Date.now()}`,
         quantity: rawQuantity,
         expiresAt: form.expiresAt || "2026-12-31",
-        receivedAt: now.slice(0, 10),
+        receivedAt: createdAt.slice(0, 10),
       };
 
       setLots((current) => [lot, ...current]);
       setMovements((current) => [movement, ...current]);
       log(`Entrada manual: ${rawQuantity} ${ingredient.measure} de ${ingredient.name}`);
-      return;
+      return true;
     }
 
     setMovements((current) => [movement, ...current]);
     setLots((current) => deductLotsByMovements(current, [movement]));
     log(`Baixa manual: ${rawQuantity} ${ingredient.measure} de ${ingredient.name} - ${reason}`);
+    return true;
+  }
+
+  function addTable(form: TableForm) {
+    const seats = Math.max(1, Number(form.seats) || 0);
+
+    if (!form.label.trim()) {
+      log("Informe o nome da mesa para cadastrar");
+      return;
+    }
+
+    setTables((current) => [
+      ...current,
+      {
+        id: `table-${Date.now()}`,
+        unitId: data.unit.id,
+        label: form.label.trim(),
+        seats,
+        status: "free",
+      },
+    ]);
+    log(`${form.label.trim()} cadastrada com ${seats} lugares`);
   }
 
   function closeCash() {
@@ -978,14 +1035,21 @@ export function SaboreApp({
           {activeView === "kitchen" && (
             <KitchenView orders={orders} data={data} onAdvance={advanceOrder} />
           )}
+          {activeView === "catalog" && (
+            <CatalogView
+              data={data}
+              onAddProduct={addProduct}
+              onAddRecipeItem={addRecipeItem}
+              onAddTable={addTable}
+            />
+          )}
           {activeView === "stock" && (
             <StockView
               positions={stockPositions}
               lots={lots}
               data={data}
-              onReceiveStock={receiveStock}
-              onAddProduct={addProduct}
-              onAddRecipeItem={addRecipeItem}
+              dialog={stockDialog}
+              onOpenDialog={setStockDialog}
               onAdjustStock={adjustStock}
             />
           )}
@@ -1843,7 +1907,7 @@ function TablesView({
           const totals = activeOrder
             ? calculateOrderTotals(activeOrder, data.products)
             : null;
-          const isAvailable = !activeOrder && table.status === "free";
+          const isAvailable = !activeOrder && table.status !== "closing";
 
           return (
             <Card key={table.id}>
@@ -1923,7 +1987,9 @@ function DeliveryView({
   onSendWhatsApp: (orderId: string) => void;
 }) {
   const deliveryOrders = orders.filter(
-    (order) => order.channel === "delivery" && order.status !== "cancelled",
+    (order) =>
+      order.channel === "delivery" &&
+      !["paid", "cancelled"].includes(order.status),
   );
 
   return (
@@ -2130,22 +2196,16 @@ function KitchenView({
   );
 }
 
-function StockView({
-  positions,
-  lots,
+function CatalogView({
   data,
-  onReceiveStock,
   onAddProduct,
   onAddRecipeItem,
-  onAdjustStock,
+  onAddTable,
 }: {
-  positions: ReturnType<typeof calculateStockPositions>;
-  lots: InventoryLot[];
   data: SaboreData;
-  onReceiveStock: () => void;
   onAddProduct: (form: ProductForm) => void;
   onAddRecipeItem: (form: RecipeForm) => void;
-  onAdjustStock: (form: StockAdjustmentForm) => void;
+  onAddTable: (form: TableForm) => void;
 }) {
   const [productForm, setProductForm] = useState<ProductForm>({
     name: "",
@@ -2158,14 +2218,9 @@ function StockView({
     ingredientId: data.ingredients[0]?.id ?? "",
     quantity: "",
   });
-  const [stockForm, setStockForm] = useState<StockAdjustmentForm>({
-    ingredientId: data.ingredients[0]?.id ?? "",
-    quantity: "",
-    direction: "in",
-    reason: "compra",
-    supplier: "Atacadao AL",
-    batchCode: "",
-    expiresAt: "2026-12-31",
+  const [tableForm, setTableForm] = useState<TableForm>({
+    label: "",
+    seats: "4",
   });
   const activeProducts = data.products.filter((product) => product.active);
   const selectedProductRecipe = data.recipe.filter(
@@ -2182,24 +2237,17 @@ function StockView({
     setRecipeForm((current) => ({ ...current, quantity: "" }));
   }
 
-  function submitStockAdjustment() {
-    onAdjustStock(stockForm);
-    setStockForm((current) => ({ ...current, quantity: "", batchCode: "" }));
+  function submitTable() {
+    onAddTable(tableForm);
+    setTableForm((current) => ({ ...current, label: "" }));
   }
 
   return (
     <div className="space-y-5 pt-5">
-      <div className="flex justify-end">
-        <Button onClick={onReceiveStock}>
-          <Plus />
-          Receber insumo
-        </Button>
-      </div>
-
       <div className="grid gap-5 xl:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle>Novo item do cardapio</CardTitle>
+            <CardTitle>Itens do cardapio</CardTitle>
             <CardDescription>Cadastro rapido para colocar produto no PDV.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -2251,8 +2299,8 @@ function StockView({
 
         <Card>
           <CardHeader>
-            <CardTitle>Ficha tecnica opcional</CardTitle>
-            <CardDescription>Use quando o produto tiver receita controlada.</CardDescription>
+            <CardTitle>Ficha tecnica</CardTitle>
+            <CardDescription>Opcional para quem quer baixa automatica por receita.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <label className="grid gap-2 text-sm font-medium">
@@ -2335,107 +2383,116 @@ function StockView({
 
         <Card>
           <CardHeader>
-            <CardTitle>Entrada e baixa manual</CardTitle>
-            <CardDescription>Para compra, venda avulsa, perda ou improprio.</CardDescription>
+            <CardTitle>Mesas e lugares</CardTitle>
+            <CardDescription>Cadastre a quantidade fisica do salao.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <label className="grid gap-2 text-sm font-medium">
-              Insumo
-              <select
-                className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
-                value={stockForm.ingredientId}
-                onChange={(event) =>
-                  setStockForm((current) => ({
-                    ...current,
-                    ingredientId: event.target.value,
-                  }))
-                }
-              >
-                {data.ingredients.map((ingredient) => (
-                  <option key={ingredient.id} value={ingredient.id}>
-                    {ingredient.name} ({ingredient.measure})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant={stockForm.direction === "in" ? "secondary" : "outline"}
-                onClick={() =>
-                  setStockForm((current) => ({
-                    ...current,
-                    direction: "in",
-                    reason: current.reason || "compra",
-                  }))
-                }
-              >
-                Entrada
-              </Button>
-              <Button
-                variant={stockForm.direction === "out" ? "secondary" : "outline"}
-                onClick={() =>
-                  setStockForm((current) => ({
-                    ...current,
-                    direction: "out",
-                    reason: current.reason || "venda",
-                  }))
-                }
-              >
-                Saida
-              </Button>
-            </div>
             <TextField
-              label="Quantidade"
-              value={stockForm.quantity}
-              onChange={(quantity) =>
-                setStockForm((current) => ({ ...current, quantity }))
-              }
-              inputMode="decimal"
+              label="Nome da mesa"
+              value={tableForm.label}
+              onChange={(label) => setTableForm((current) => ({ ...current, label }))}
+              placeholder="Mesa 5"
             />
-            <label className="grid gap-2 text-sm font-medium">
-              Motivo
-              <select
-                className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
-                value={stockForm.reason}
-                onChange={(event) =>
-                  setStockForm((current) => ({
-                    ...current,
-                    reason: event.target.value,
-                  }))
-                }
-              >
-                <option value="compra">Compra / recebimento</option>
-                <option value="venda">Venda manual</option>
-                <option value="improprio">Improprio para consumo</option>
-                <option value="perda">Perda / quebra</option>
-                <option value="contagem">Ajuste de contagem</option>
-              </select>
-            </label>
-            {stockForm.direction === "in" && (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <TextField
-                  label="Fornecedor"
-                  value={stockForm.supplier}
-                  onChange={(supplier) =>
-                    setStockForm((current) => ({ ...current, supplier }))
-                  }
-                />
-                <TextField
-                  label="Validade"
-                  value={stockForm.expiresAt}
-                  onChange={(expiresAt) =>
-                    setStockForm((current) => ({ ...current, expiresAt }))
-                  }
-                  placeholder="2026-12-31"
+            <TextField
+              label="Lugares"
+              value={tableForm.seats}
+              onChange={(seats) => setTableForm((current) => ({ ...current, seats }))}
+              inputMode="numeric"
+            />
+            <Button className="w-full" onClick={submitTable}>
+              <Table2 />
+              Cadastrar mesa
+            </Button>
+            <div className="rounded-md border border-border bg-muted/20 p-3 text-sm">
+              <p className="text-xs font-medium uppercase text-muted-foreground">
+                Mesas cadastradas
+              </p>
+              <div className="mt-2 space-y-2">
+                <Row label="Total" value={String(data.tables.length)} strong />
+                <Row
+                  label="Lugares"
+                  value={String(data.tables.reduce((sum, table) => sum + table.seats, 0))}
                 />
               </div>
-            )}
-            <Button className="w-full" onClick={submitStockAdjustment}>
-              <PackageCheck />
-              Registrar movimento
-            </Button>
+            </div>
           </CardContent>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+function StockView({
+  positions,
+  lots,
+  data,
+  dialog,
+  onOpenDialog,
+  onAdjustStock,
+}: {
+  positions: ReturnType<typeof calculateStockPositions>;
+  lots: InventoryLot[];
+  data: SaboreData;
+  dialog: StockDialog;
+  onOpenDialog: (dialog: StockDialog) => void;
+  onAdjustStock: (form: StockAdjustmentForm) => boolean;
+}) {
+  const [stockForm, setStockForm] = useState<StockAdjustmentForm>({
+    ingredientId: data.ingredients[0]?.id ?? "",
+    quantity: "",
+    direction: "in",
+    reason: "compra",
+    supplier: "Atacadao AL",
+    batchCode: "",
+    expiresAt: "2026-12-31",
+  });
+
+  function openMovement(direction: StockAdjustmentForm["direction"]) {
+    setStockForm((current) => ({
+      ...current,
+      direction,
+      reason:
+        direction === "in"
+          ? current.reason === "venda"
+            ? "compra"
+            : current.reason || "compra"
+          : current.reason === "compra"
+            ? "venda"
+            : current.reason || "venda",
+    }));
+    onOpenDialog("movement");
+  }
+
+  function submitStockAdjustment() {
+    if (onAdjustStock(stockForm)) {
+      setStockForm((current) => ({ ...current, quantity: "", batchCode: "" }));
+      onOpenDialog(null);
+    }
+  }
+
+  return (
+    <div className="space-y-5 pt-5">
+      <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Estoque</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Entradas, baixas e validade ficam sob demanda para a tela respirar.
+          </p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <Button onClick={() => openMovement("in")}>
+            <Plus />
+            Receber insumo
+          </Button>
+          <Button variant="outline" onClick={() => openMovement("out")}>
+            <Minus />
+            Dar baixa
+          </Button>
+          <Button variant="secondary" onClick={() => onOpenDialog("lots")}>
+            <PackageCheck />
+            Lotes e validade
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -2480,12 +2537,114 @@ function StockView({
         ))}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Lotes e validade</CardTitle>
-          <CardDescription>Controle FEFO para reduzir perda de pereciveis.</CardDescription>
-        </CardHeader>
-        <CardContent>
+      {dialog === "movement" && (
+        <ModalShell title="Movimentar estoque" onClose={() => onOpenDialog(null)}>
+          <div className="space-y-4">
+            <label className="grid gap-2 text-sm font-medium">
+              Insumo
+              <select
+                className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
+                value={stockForm.ingredientId}
+                onChange={(event) =>
+                  setStockForm((current) => ({
+                    ...current,
+                    ingredientId: event.target.value,
+                  }))
+                }
+              >
+                {data.ingredients.map((ingredient) => (
+                  <option key={ingredient.id} value={ingredient.id}>
+                    {ingredient.name} ({ingredient.measure})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant={stockForm.direction === "in" ? "secondary" : "outline"}
+                onClick={() => openMovement("in")}
+              >
+                Entrada
+              </Button>
+              <Button
+                variant={stockForm.direction === "out" ? "secondary" : "outline"}
+                onClick={() => openMovement("out")}
+              >
+                Saida
+              </Button>
+            </div>
+            <TextField
+              label="Quantidade"
+              value={stockForm.quantity}
+              onChange={(quantity) =>
+                setStockForm((current) => ({ ...current, quantity }))
+              }
+              inputMode="decimal"
+            />
+            <label className="grid gap-2 text-sm font-medium">
+              Motivo
+              <select
+                className="h-10 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
+                value={stockForm.reason}
+                onChange={(event) =>
+                  setStockForm((current) => ({
+                    ...current,
+                    reason: event.target.value,
+                  }))
+                }
+              >
+                <option value="compra">Compra / recebimento</option>
+                <option value="venda">Venda manual</option>
+                <option value="improprio">Improprio para consumo</option>
+                <option value="perda">Perda / quebra</option>
+                <option value="contagem">Ajuste de contagem</option>
+              </select>
+            </label>
+            {stockForm.direction === "in" && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <TextField
+                  label="Fornecedor"
+                  value={stockForm.supplier}
+                  onChange={(supplier) =>
+                    setStockForm((current) => ({ ...current, supplier }))
+                  }
+                />
+                <TextField
+                  label="Lote"
+                  value={stockForm.batchCode}
+                  onChange={(batchCode) =>
+                    setStockForm((current) => ({ ...current, batchCode }))
+                  }
+                  placeholder="LOTE-001"
+                />
+                <TextField
+                  label="Validade"
+                  value={stockForm.expiresAt}
+                  onChange={(expiresAt) =>
+                    setStockForm((current) => ({ ...current, expiresAt }))
+                  }
+                  placeholder="2026-12-31"
+                />
+              </div>
+            )}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="outline" onClick={() => onOpenDialog(null)}>
+                Cancelar
+              </Button>
+              <Button onClick={submitStockAdjustment}>
+                <PackageCheck />
+                Registrar movimento
+              </Button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
+
+      {dialog === "lots" && (
+        <ModalShell title="Lotes e validade" wide onClose={() => onOpenDialog(null)}>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Controle FEFO para reduzir perda de pereciveis.
+          </p>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead className="text-xs uppercase text-muted-foreground">
@@ -2507,7 +2666,9 @@ function StockView({
                     <tr key={lot.id} className="border-b border-border/60">
                       <td className="py-3 font-medium">{ingredient?.name}</td>
                       <td className="text-muted-foreground">{lot.supplier}</td>
-                      <td className="font-mono text-xs text-muted-foreground">{lot.batchCode}</td>
+                      <td className="font-mono text-xs text-muted-foreground">
+                        {lot.batchCode}
+                      </td>
                       <td>
                         {lot.quantity.toFixed(2)} {ingredient?.measure}
                       </td>
@@ -2518,8 +2679,39 @@ function StockView({
               </tbody>
             </table>
           </div>
-        </CardContent>
-      </Card>
+        </ModalShell>
+      )}
+    </div>
+  );
+}
+
+function ModalShell({
+  title,
+  children,
+  onClose,
+  wide = false,
+}: {
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+  wide?: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+      <div
+        className={cn(
+          "max-h-[88vh] w-full overflow-y-auto rounded-lg border border-border bg-card p-5 shadow-xl",
+          wide ? "max-w-4xl" : "max-w-xl",
+        )}
+      >
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold">{title}</h3>
+          <Button size="icon" variant="ghost" aria-label="Fechar" onClick={onClose}>
+            <X />
+          </Button>
+        </div>
+        {children}
+      </div>
     </div>
   );
 }

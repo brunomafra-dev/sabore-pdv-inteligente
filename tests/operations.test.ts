@@ -8,10 +8,34 @@ import {
   closeCashSession,
   reserveStockForOrder,
 } from "../src/lib/operations";
+import type { Order } from "../src/lib/types";
 
 test("calculates order totals with delivery, discount and remaining amount", () => {
-  const order = demoData.orders.find((candidate) => candidate.code === "102");
-  assert.ok(order);
+  const order: Order = {
+    id: "ord-test-delivery",
+    unitId: "unit-ponta-verde",
+    code: "900",
+    channel: "delivery",
+    status: "new",
+    openedAt: "2026-05-03T12:00:00-03:00",
+    customerId: "cust-maria",
+    items: [
+      {
+        id: "item-test-1",
+        productId: "prd-pizza-familia",
+        quantity: 1,
+        name: "Familia 40 cm Pepperoni",
+        unitPrice: 111,
+        notes: "10 fatias. Borda cheddar.",
+      },
+      { id: "item-test-2", productId: "prd-suco-uva", quantity: 1 },
+    ],
+    deliveryFee: 8,
+    discount: 5,
+    payments: [],
+    fiscalStatus: "disabled",
+    whatsappStatus: "queued",
+  };
 
   const totals = calculateOrderTotals(order, demoData.products);
 
@@ -33,8 +57,21 @@ test("calculates recipe CMV from ficha tecnica", () => {
 });
 
 test("generates stock movements for an order using recipe quantities", () => {
-  const order = demoData.orders.find((candidate) => candidate.code === "101");
-  assert.ok(order);
+  const order: Order = {
+    id: "ord-test-table",
+    unitId: "unit-ponta-verde",
+    code: "901",
+    channel: "table",
+    status: "new",
+    openedAt: "2026-05-03T12:00:00-03:00",
+    tableId: "table-1",
+    items: [{ id: "item-test-3", productId: "prd-pizza-grande", quantity: 1 }],
+    deliveryFee: 0,
+    discount: 0,
+    payments: [],
+    fiscalStatus: "pending",
+    whatsappStatus: "not_sent",
+  };
 
   const movements = reserveStockForOrder(
     order,

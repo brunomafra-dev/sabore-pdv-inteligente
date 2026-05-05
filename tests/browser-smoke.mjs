@@ -39,6 +39,19 @@ async function verifyMobile(browser) {
   page.on("pageerror", (error) => errors.push(error.message));
 
   await page.goto(`${baseUrl}/app`, { waitUntil: "networkidle" });
+
+  await page.getByRole("button", { name: /^Delivery$/ }).first().click();
+  await page.waitForTimeout(200);
+  const deliveryStartsClosed = (await page.locator("body").innerText()).includes(
+    "Nenhum delivery aberto.",
+  );
+
+  await page.getByRole("button", { name: /^Atendimento$/ }).first().click();
+  await page.waitForTimeout(200);
+  const serviceStartsClosed = (await page.locator("body").innerText()).includes(
+    "Nenhuma mesa em atendimento.",
+  );
+
   await page.getByRole("button", { name: /^Mesas$/ }).first().click();
   await page.getByRole("button", { name: /^Abrir mesa$/ }).first().click();
   await page.waitForTimeout(300);
@@ -48,8 +61,60 @@ async function verifyMobile(browser) {
     .isVisible();
   await page.getByRole("button", { name: /^Cozinha$/ }).click();
   await page.waitForTimeout(300);
+  const composerClearedOnNavigation = !(
+    await page.locator("body").innerText()
+  ).includes("Novo pedido Mesa");
+
+  await page.getByRole("button", { name: /^Mesas$/ }).first().click();
+  await page.getByRole("button", { name: /^Abrir mesa$/ }).first().click();
+  await page.getByRole("button", { name: /^Adicionar pizza$/ }).click();
+  await page.getByRole("button", { name: /^Abrir pedido$/ }).click();
+  await page.waitForTimeout(300);
+
+  await page.getByRole("button", { name: /^Cozinha$/ }).click();
+  await page.waitForTimeout(300);
+  const kitchenText = await page.locator("body").innerText();
+  const kitchenHasRealOrder =
+    kitchenText.includes("Fila") &&
+    /#\d+/.test(kitchenText) &&
+    /(?:0|1) min/.test(kitchenText);
+
+  await page.getByRole("button", { name: /^Atendimento$/ }).first().click();
+  await page.waitForTimeout(300);
+  const serviceText = await page.locator("body").innerText();
+  const serviceHasRealTable =
+    serviceText.includes("Mesa 1") && /#\d+/.test(serviceText);
+
+  await page.getByRole("button", { name: /^Cadastro$/ }).click();
+  await page.waitForTimeout(300);
+  const catalogText = await page.locator("body").innerText();
+  const catalogFormsVisible =
+    catalogText.includes("Itens do cardapio") &&
+    catalogText.includes("Ficha tecnica") &&
+    catalogText.includes("Mesas e lugares");
+
   await page.getByRole("button", { name: /^Estoque$/ }).click();
   await page.waitForTimeout(300);
+  const stockText = await page.locator("body").innerText();
+  const stockIsFocused =
+    stockText.includes("Receber insumo") &&
+    stockText.includes("Dar baixa") &&
+    !stockText.includes("Itens do cardapio");
+
+  await page.getByRole("button", { name: /^Receber insumo$/ }).click();
+  await page.waitForTimeout(200);
+  const movementPopupVisible = await page
+    .getByText(/Movimentar estoque/i)
+    .first()
+    .isVisible();
+  await page.getByRole("button", { name: /^Fechar$/ }).click();
+
+  await page.getByRole("button", { name: /^Lotes e validade$/ }).click();
+  await page.waitForTimeout(200);
+  const lotsPopupVisible = await page
+    .getByText(/Controle FEFO/i)
+    .first()
+    .isVisible();
 
   const bodyText = (await page.locator("body").innerText()).trim();
   const textLength = bodyText.length;
@@ -67,12 +132,16 @@ async function verifyMobile(browser) {
     textLength,
     overlay,
     horizontalOverflow,
-    composerClearedOnNavigation: !bodyText.includes("Novo pedido Mesa"),
+    composerClearedOnNavigation,
+    deliveryStartsClosed,
+    serviceStartsClosed,
+    kitchenHasRealOrder,
+    serviceHasRealTable,
     pizzaBuilderVisible,
-    stockFormsVisible:
-      bodyText.includes("Novo item do cardapio") &&
-      bodyText.includes("Ficha tecnica opcional") &&
-      bodyText.includes("Entrada e baixa manual"),
+    catalogFormsVisible,
+    stockIsFocused,
+    movementPopupVisible,
+    lotsPopupVisible,
     errors,
   };
 }
@@ -92,7 +161,14 @@ if (
   mobile.errors.length > 0 ||
   mobile.horizontalOverflow ||
   !mobile.pizzaBuilderVisible ||
-  !mobile.stockFormsVisible ||
+  !mobile.deliveryStartsClosed ||
+  !mobile.serviceStartsClosed ||
+  !mobile.kitchenHasRealOrder ||
+  !mobile.serviceHasRealTable ||
+  !mobile.catalogFormsVisible ||
+  !mobile.stockIsFocused ||
+  !mobile.movementPopupVisible ||
+  !mobile.lotsPopupVisible ||
   !mobile.composerClearedOnNavigation
 ) {
   console.error(JSON.stringify({ desktop, mobile }, null, 2));
