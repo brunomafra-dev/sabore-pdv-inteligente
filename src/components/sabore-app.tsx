@@ -60,6 +60,7 @@ import {
   nextOrderStatus,
   reserveStockForOrder,
 } from "@/lib/operations";
+import type { SaboreMutation } from "@/lib/sabore-mutations";
 import { cn, formatCurrency, formatPercent } from "@/lib/utils";
 import type {
   CashSession,
@@ -187,6 +188,10 @@ const paymentLabel: Record<PaymentMethod, string> = {
 
 function getCurrentIso() {
   return new Date().toISOString();
+}
+
+function createId() {
+  return crypto.randomUUID();
 }
 
 const navItems: Array<{
@@ -358,6 +363,33 @@ export function SaboreApp({
     setActivity((current) => [message, ...current].slice(0, 6));
   }
 
+  async function persistMutation(mutation: SaboreMutation) {
+    if (dataSource?.source !== "supabase") return;
+
+    try {
+      const response = await fetch("/api/sabore/mutations", {
+        method: "POST",
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mutation),
+      });
+
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+
+        throw new Error(result?.error ?? "Falha ao salvar no Supabase");
+      }
+    } catch (error) {
+      log(
+        error instanceof Error
+          ? `Nao salvou no Supabase: ${error.message}`
+          : "Nao salvou no Supabase",
+      );
+    }
+  }
+
   function timestamp() {
     const iso = getCurrentIso();
     setClockIso(iso);
@@ -510,7 +542,7 @@ export function SaboreApp({
         customItems: [
           ...current.customItems,
           {
-            id: `pizza-${Date.now()}`,
+            id: createId(),
             quantity: 1,
             ...pizzaItem,
           },
@@ -539,14 +571,14 @@ export function SaboreApp({
 
     const catalogItems = Object.entries(composer.items)
       .filter(([, quantity]) => quantity > 0)
-      .map(([productId, quantity], index) => ({
-        id: `item-${Date.now()}-${index}`,
+      .map(([productId, quantity]) => ({
+        id: createId(),
         productId,
         quantity,
         notes: composer.notes[productId]?.trim() || undefined,
       }));
-    const customItems = composer.customItems.map((item, index) => ({
-      id: `item-${Date.now()}-custom-${index}`,
+    const customItems = composer.customItems.map((item) => ({
+      id: createId(),
       productId: item.productId,
       quantity: item.quantity,
       notes: item.notes,
@@ -584,7 +616,7 @@ export function SaboreApp({
       const stockMovements = reserveStockForOrder(
         {
           ...existingOrder,
-          id: `${existingOrder.id}-${Date.now()}`,
+          id: createId(),
           items: selectedItems,
         },
         data.recipe,
@@ -592,7 +624,7 @@ export function SaboreApp({
         createdAt,
       ).map((movement) => ({
         ...movement,
-        id: `${movement.id}-${Date.now()}`,
+        id: createId(),
         orderId: existingOrder.id,
       }));
 
@@ -609,13 +641,19 @@ export function SaboreApp({
       log(
         `${selectedItems.length} item(ns) lancados na ${data.tables.find((table) => table.id === existingOrder.tableId)?.label ?? `mesa do pedido ${existingOrder.code}`}`,
       );
+      void persistMutation({
+        type: "append_order_items",
+        orderId: existingOrder.id,
+        items: selectedItems,
+        movements: stockMovements,
+      });
       return;
     }
 
     const maxCode = Math.max(...orders.map((order) => Number(order.code)), 100);
     const code = String(maxCode + 1);
     const order: Order = {
-      id: `ord-${Date.now()}`,
+      id: createId(),
       unitId: data.unit.id,
       code,
       channel: composer.channel,
@@ -636,7 +674,7 @@ export function SaboreApp({
       data.recipe,
       data.ingredients,
       order.openedAt,
-    );
+    ).map((movement) => ({ ...movement, id: createId() }));
 
     setOrders((current) => [order, ...current]);
     if (order.channel === "table" && order.tableId) {
@@ -652,46 +690,66 @@ export function SaboreApp({
     log(
       `Pedido ${code} aberto em ${channelLabel[order.channel]} com ${selectedItems.length} item(ns)`,
     );
+    void persistMutation({
+      type: "create_order",
+      order,
+      movements: stockMovements,
+    });
   }
 
   function advanceOrder(orderId: string) {
+    const order = orders.find((candidate) => candidate.id === orderId);
+    const status = order ? nextOrderStatus(order.status) : undefined;
+
     setOrders((current) =>
       current.map((order) =>
         order.id === orderId
           ? { ...order, status: nextOrderStatus(order.status) }
           : order,
-      ),
+        ),
     );
-    const order = orders.find((candidate) => candidate.id === orderId);
 
     if (order) {
       log(`Pedido ${order.code} mudou para ${statusLabel[nextOrderStatus(order.status)]}`);
     }
+
+    if (status) {
+      void persistMutation({
+        type: "update_order_status",
+        orderId,
+        status,
+      });
+    }
   }
 
   function payOrder(orderId: string, method: PaymentMethod) {
+    const order = orders.find((candidate) => candidate.id === orderId);
+    if (!order) return;
+
+    const totals = calculateOrderTotals(order, data.products);
+    if (totals.remaining <= 0) {
+      log(`Pedido ${order.code} ja esta quitado`);
+      return;
+    }
+
+    const payment = {
+      id: createId(),
+      method,
+      amount: totals.remaining,
+      receivedAt: timestamp(),
+    };
+
     setOrders((current) =>
       current.map((order) => {
         if (order.id !== orderId) return order;
 
-        const totals = calculateOrderTotals(order, data.products);
-
         return {
           ...order,
           status: "paid",
-          payments: [
-            ...order.payments,
-            {
-              id: `pay-${order.code}-${method}`,
-              method,
-              amount: totals.remaining,
-              receivedAt: timestamp(),
-            },
-          ],
+          payments: [...order.payments, payment],
         };
       }),
     );
-    const order = orders.find((candidate) => candidate.id === orderId);
 
     if (order?.tableId) {
       setTables((current) =>
@@ -702,6 +760,12 @@ export function SaboreApp({
     }
 
     if (order) log(`Pagamento ${paymentLabel[method]} registrado no pedido ${order.code}`);
+    void persistMutation({
+      type: "pay_order",
+      orderId,
+      payment,
+      tableId: order.tableId,
+    });
   }
 
   function generateBill(orderId: string) {
@@ -713,31 +777,31 @@ export function SaboreApp({
   }
 
   function finalizeOrder(orderId: string) {
+    const order = orders.find((candidate) => candidate.id === orderId);
+    if (!order) return;
+
+    const totals = calculateOrderTotals(order, data.products);
+    const payment =
+      totals.remaining > 0
+        ? {
+            id: createId(),
+            method: "cash" as const,
+            amount: totals.remaining,
+            receivedAt: timestamp(),
+          }
+        : null;
+
     setOrders((current) =>
       current.map((order) => {
         if (order.id !== orderId) return order;
 
-        const totals = calculateOrderTotals(order, data.products);
-
         return {
           ...order,
           status: "paid",
-          payments:
-            totals.remaining > 0
-              ? [
-                  ...order.payments,
-                  {
-                    id: `pay-${order.code}-final`,
-                    method: "cash",
-                    amount: totals.remaining,
-                    receivedAt: timestamp(),
-                  },
-                ]
-              : order.payments,
+          payments: payment ? [...order.payments, payment] : order.payments,
         };
       }),
     );
-    const order = orders.find((candidate) => candidate.id === orderId);
 
     if (order?.tableId) {
       setTables((current) =>
@@ -748,6 +812,20 @@ export function SaboreApp({
     }
 
     if (order) log(`Mesa/pedido ${order.code} finalizado no caixa`);
+    if (payment) {
+      void persistMutation({
+        type: "pay_order",
+        orderId,
+        payment,
+        tableId: order.tableId,
+      });
+    } else {
+      void persistMutation({
+        type: "update_order_status",
+        orderId,
+        status: "paid",
+      });
+    }
   }
 
   async function sendWhatsApp(orderId: string) {
@@ -775,6 +853,11 @@ export function SaboreApp({
       ),
     );
     log(`WhatsApp de status enviado para pedido ${order.code}`);
+    void persistMutation({
+      type: "update_whatsapp_status",
+      orderId,
+      whatsappStatus: "sent",
+    });
   }
 
   function addProduct(form: ProductForm) {
@@ -786,7 +869,7 @@ export function SaboreApp({
     }
 
     const product: Product = {
-      id: `prd-${Date.now()}`,
+      id: createId(),
       unitId: data.unit.id,
       name: form.name.trim(),
       category: form.category.trim() || "Cardapio",
@@ -797,6 +880,7 @@ export function SaboreApp({
 
     setProducts((current) => [product, ...current]);
     log(`${product.name} cadastrado no cardapio`);
+    void persistMutation({ type: "create_product", product });
   }
 
   function addRecipeItem(form: RecipeForm) {
@@ -812,7 +896,7 @@ export function SaboreApp({
     }
 
     const item: RecipeItem = {
-      id: `rec-${Date.now()}`,
+      id: createId(),
       productId: product.id,
       ingredientId: ingredient.id,
       quantity,
@@ -822,6 +906,7 @@ export function SaboreApp({
     log(
       `Ficha tecnica: ${quantity} ${ingredient.measure} de ${ingredient.name} em ${product.name}`,
     );
+    void persistMutation({ type: "create_recipe_item", recipeItem: item });
   }
 
   function adjustStock(form: StockAdjustmentForm) {
@@ -839,7 +924,7 @@ export function SaboreApp({
     const signedQuantity = form.direction === "in" ? rawQuantity : -rawQuantity;
     const reason = form.reason.trim() || (form.direction === "in" ? "compra" : "venda");
     const movement: InventoryMovement = {
-      id: `mov-manual-${Date.now()}`,
+      id: createId(),
       unitId: data.unit.id,
       ingredientId: ingredient.id,
       type: form.direction === "in" ? "receipt" : "manual_exit",
@@ -851,7 +936,7 @@ export function SaboreApp({
 
     if (form.direction === "in") {
       const lot: InventoryLot = {
-        id: `lot-manual-${Date.now()}`,
+        id: createId(),
         ingredientId: ingredient.id,
         supplier: form.supplier.trim() || "Fornecedor manual",
         batchCode: form.batchCode.trim() || `MAN-${Date.now()}`,
@@ -863,12 +948,14 @@ export function SaboreApp({
       setLots((current) => [lot, ...current]);
       setMovements((current) => [movement, ...current]);
       log(`Entrada manual: ${rawQuantity} ${ingredient.measure} de ${ingredient.name}`);
+      void persistMutation({ type: "stock_adjustment", movement, lot });
       return true;
     }
 
     setMovements((current) => [movement, ...current]);
     setLots((current) => deductLotsByMovements(current, [movement]));
     log(`Baixa manual: ${rawQuantity} ${ingredient.measure} de ${ingredient.name} - ${reason}`);
+    void persistMutation({ type: "stock_adjustment", movement });
     return true;
   }
 
@@ -880,17 +967,17 @@ export function SaboreApp({
       return;
     }
 
-    setTables((current) => [
-      ...current,
-      {
-        id: `table-${Date.now()}`,
-        unitId: data.unit.id,
-        label: form.label.trim(),
-        seats,
-        status: "free",
-      },
-    ]);
+    const table = {
+      id: createId(),
+      unitId: data.unit.id,
+      label: form.label.trim(),
+      seats,
+      status: "free" as const,
+    };
+
+    setTables((current) => [...current, table]);
     log(`${form.label.trim()} cadastrada com ${seats} lugares`);
+    void persistMutation({ type: "create_table", table });
   }
 
   function closeCash() {
@@ -900,6 +987,11 @@ export function SaboreApp({
       expectedAmount: closing.expectedDrawer,
     }));
     log(`Caixa fechado com gaveta esperada de ${formatCurrency(closing.expectedDrawer)}`);
+    void persistMutation({
+      type: "close_cash",
+      cashSessionId: cashSession.id,
+      expectedAmount: closing.expectedDrawer,
+    });
   }
 
   return (
