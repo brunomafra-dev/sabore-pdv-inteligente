@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { getFiscalProvider } from "@/lib/integrations/focus-nfe";
 import { issueNfceSchema } from "@/lib/integrations/contracts";
+import { apiRateLimit, enforceRateLimit } from "@/lib/security/rate-limit";
 
 export async function POST(request: Request) {
+  const limited = await enforceRateLimit(request, apiRateLimit("fiscal:nfce"));
+
+  if (limited) return limited;
+
   const payload = await request.json().catch(() => null);
   const parsed = issueNfceSchema.safeParse(payload);
 

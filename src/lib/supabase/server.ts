@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 let adminClient: SupabaseClient | null = null;
 let dataClient: SupabaseClient | null = null;
+let authClient: SupabaseClient | null = null;
 
 export function normalizeSupabaseUrl(url: string) {
   return url.trim().replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
@@ -45,4 +46,23 @@ export function getSupabaseDataClient() {
   }
 
   return dataClient;
+}
+
+export function getSupabaseAuthClient() {
+  const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!rawUrl || !key) {
+    throw new Error("Supabase auth env vars are missing");
+  }
+
+  const url = normalizeSupabaseUrl(rawUrl);
+
+  if (!authClient) {
+    authClient = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  }
+
+  return authClient;
 }

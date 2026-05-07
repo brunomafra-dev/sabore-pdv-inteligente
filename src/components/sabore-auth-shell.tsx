@@ -30,6 +30,10 @@ type DataResponse = {
   profile: Profile;
 };
 
+type SignInResponse =
+  | { session: Session }
+  | { error?: string; message?: string; retryAfterSeconds?: number };
+
 function Field({
   label,
   type = "text",
@@ -148,22 +152,49 @@ export function SaboreAuthShell() {
     setSubmitting(true);
     setError("");
 
-    const { data: authData, error: signInError } =
-      await supabase.auth.signInWithPassword({
-        email,
-        password,
+    try {
+      const response = await fetch("/api/auth/sign-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          password,
+        }),
+      });
+      const result = (await response.json().catch(() => null)) as SignInResponse | null;
+
+      if (!response.ok || !result || !("session" in result)) {
+        const errorMessage =
+          result && "message" in result
+            ? result.message
+            : result && "error" in result
+              ? result.error
+              : undefined;
+
+        setError(errorMessage ?? "Nao foi possivel entrar no Sabore");
+        return;
+      }
+
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: result.session.access_token,
+        refresh_token: result.session.refresh_token,
       });
 
-    setSubmitting(false);
+      if (sessionError) {
+        setError(sessionError.message);
+        return;
+      }
 
-    if (signInError) {
-      setError(signInError.message);
-      return;
-    }
-
-    if (authData.session) {
-      setSession(authData.session);
-      await loadData(authData.session.access_token);
+      setSession(result.session);
+      await loadData(result.session.access_token);
+    } catch (signInError) {
+      setError(
+        signInError instanceof Error
+          ? signInError.message
+          : "Nao foi possivel entrar no Sabore",
+      );
+    } finally {
+      setSubmitting(false);
     }
   }
 

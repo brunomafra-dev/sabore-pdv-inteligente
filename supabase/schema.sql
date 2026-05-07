@@ -172,6 +172,14 @@ create table public.whatsapp_templates (
   monthly_price numeric(10,2)
 );
 
+create table public.security_rate_limits (
+  key text primary key,
+  count integer not null default 0,
+  reset_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.organizations enable row level security;
 alter table public.restaurant_units enable row level security;
 alter table public.user_profiles enable row level security;
@@ -188,7 +196,49 @@ alter table public.cash_sessions enable row level security;
 alter table public.inventory_movements enable row level security;
 alter table public.fiscal_documents enable row level security;
 alter table public.whatsapp_templates enable row level security;
+alter table public.security_rate_limits enable row level security;
 
 create index idx_orders_unit_status on public.orders(unit_id, status);
 create index idx_inventory_lots_expiry on public.inventory_lots(ingredient_id, expires_at);
 create index idx_movements_unit_created on public.inventory_movements(unit_id, created_at desc);
+create index idx_security_rate_limits_reset on public.security_rate_limits(reset_at);
+
+create or replace function public.take_rate_limit(
+  p_key text,
+  p_limit integer,
+  p_window_seconds integer
+)
+returns table(allowed boolean, current_count integer, reset_at timestamptz)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_now timestamptz := now();
+  v_reset_at timestamptz := now() + make_interval(secs => p_window_seconds);
+  v_record public.security_rate_limits%rowtype;
+begin
+  insert into public.security_rate_limits as limits (key, count, reset_at, updated_at)
+  values (p_key, 1, v_reset_at, v_now)
+  on conflict (key) do update
+    set count = case
+      when limits.reset_at <= v_now then 1
+      else limits.count + 1
+    end,
+    reset_at = case
+      when limits.reset_at <= v_now then v_reset_at
+      else limits.reset_at
+    end,
+    updated_at = v_now
+  returning limits.* into v_record;
+
+  return query
+  select
+    v_record.count <= p_limit,
+    v_record.count,
+    v_record.reset_at;
+end;
+$$;
+
+revoke all on function public.take_rate_limit(text, integer, integer) from public;
+grant execute on function public.take_rate_limit(text, integer, integer) to service_role;

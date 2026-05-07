@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { whatsappTemplateSchema } from "@/lib/integrations/contracts";
 import { getWhatsAppProvider } from "@/lib/integrations/whatsapp";
+import { apiRateLimit, enforceRateLimit } from "@/lib/security/rate-limit";
 
 export async function POST(request: Request) {
+  const limited = await enforceRateLimit(request, apiRateLimit("whatsapp:send"));
+
+  if (limited) return limited;
+
   const payload = await request.json().catch(() => null);
   const parsed = whatsappTemplateSchema.safeParse(payload);
 

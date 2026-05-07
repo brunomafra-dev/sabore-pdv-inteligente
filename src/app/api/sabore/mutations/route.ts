@@ -6,6 +6,7 @@ import {
   getAuthenticatedProfile,
   type AuthenticatedProfile,
 } from "@/lib/supabase/access";
+import { apiRateLimit, enforceRateLimit } from "@/lib/security/rate-limit";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -586,6 +587,10 @@ async function handleMutation(client: SupabaseClient, mutation: SaboreMutation) 
 }
 
 export async function POST(request: Request) {
+  const limited = await enforceRateLimit(request, apiRateLimit("sabore:mutations"));
+
+  if (limited) return limited;
+
   const payload = await request.json().catch(() => null);
   const parsed = saboreMutationSchema.safeParse(payload);
 
