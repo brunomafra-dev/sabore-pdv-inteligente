@@ -67,3 +67,25 @@ test("sanitizes mutation strings during schema parsing", () => {
   assert.equal(parsed.product.name, "Pizza Especial");
   assert.equal(parsed.product.category, "Pizzas");
 });
+
+test("rejects commercial plan changes from unit settings payloads", () => {
+  const parsed = saboreMutationSchema.safeParse({
+    type: "update_unit_settings",
+    organization: {
+      id: "00000000-0000-4000-8000-000000000001",
+      name: "Pizza e Cia",
+      planCode: "operation",
+      planPrice: 89.9,
+    },
+    unit: {
+      id: "00000000-0000-4000-8000-000000000101",
+      organizationId: "00000000-0000-4000-8000-000000000001",
+      name: "Pizza e Cia Ponta Verde",
+      city: "Maceio",
+      neighborhood: "Ponta Verde",
+      fiscalEnabled: true,
+    },
+  });
+
+  assert.equal(parsed.success, false);
+});

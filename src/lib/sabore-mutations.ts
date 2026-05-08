@@ -122,9 +122,7 @@ const tableSchema = z.object({
 const organizationSettingsSchema = z.object({
   id: uuidSchema,
   name: textField(160),
-  planCode: z.enum(["essential", "operation"]),
-  planPrice: moneyField(10_000),
-});
+}).strict();
 
 const unitSettingsSchema = z.object({
   id: uuidSchema,
@@ -132,8 +130,7 @@ const unitSettingsSchema = z.object({
   name: textField(160),
   city: textField(100),
   neighborhood: textField(100),
-  fiscalEnabled: z.boolean(),
-});
+}).strict();
 
 const ingredientSchema = z.object({
   id: uuidSchema,

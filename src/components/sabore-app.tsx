@@ -163,12 +163,9 @@ type IngredientForm = {
 
 type UnitSettingsForm = {
   organizationName: string;
-  planCode: PlanCode;
-  planPrice: string;
   unitName: string;
   city: string;
   neighborhood: string;
-  fiscalEnabled: boolean;
 };
 
 type UserForm = {
@@ -257,6 +254,7 @@ const navItems: Array<{
   label: string;
   icon: LucideIcon;
   feature?: PlanFeature;
+  platformOnly?: boolean;
 }> = [
   { id: "overview", label: "Painel", icon: Store },
   { id: "service", label: "Atendimento", icon: ShoppingCart },
@@ -267,7 +265,7 @@ const navItems: Array<{
   { id: "stock", label: "Estoque", icon: PackageCheck },
   { id: "reports", label: "Relatorios", icon: BarChart3 },
   { id: "admin", label: "Admin", icon: Settings },
-  { id: "integrations", label: "Integracoes", icon: ReceiptText },
+  { id: "integrations", label: "Integracoes", icon: ReceiptText, platformOnly: true },
 ];
 
 const emptyComposerItems: ComposerState["items"] = {};
@@ -279,6 +277,10 @@ function cloneData<T>(value: T): T {
 
 function canAccessView(role: Role | undefined, view: View, planCode: PlanCode) {
   const navItem = navItems.find((item) => item.id === view);
+
+  if (navItem?.platformOnly) {
+    return false;
+  }
 
   if (navItem?.feature && !hasPlanFeature(planCode, navItem.feature)) {
     return false;
@@ -555,6 +557,11 @@ export function SaboreApp({
       existingOrderId?: string;
     } = {},
   ) {
+    if (channel === "delivery" && !hasPlanFeature(organization.planCode, "internalDelivery")) {
+      log("Delivery proprio faz parte do plano Operacao ou modulo adicional");
+      return;
+    }
+
     setActiveView(
       channel === "delivery"
         ? "delivery"
@@ -1037,6 +1044,11 @@ export function SaboreApp({
   }
 
   function addRecipeItem(form: RecipeForm) {
+    if (!hasPlanFeature(organization.planCode, "recipes")) {
+      log("Ficha tecnica faz parte do plano Operacao");
+      return;
+    }
+
     const quantity = Math.max(0, Number(form.quantity) || 0);
     const product = products.find((candidate) => candidate.id === form.productId);
     const ingredient = data.ingredients.find(
@@ -1086,8 +1098,6 @@ export function SaboreApp({
   }
 
   function updateUnitSettings(form: UnitSettingsForm) {
-    const planPrice = Math.max(0, Number(form.planPrice) || 0);
-
     if (!form.organizationName.trim() || !form.unitName.trim()) {
       log("Informe organizacao e unidade para salvar configuracao");
       return;
@@ -1096,15 +1106,12 @@ export function SaboreApp({
     const nextOrganization = {
       ...data.organization,
       name: form.organizationName.trim(),
-      planCode: form.planCode,
-      planPrice,
     };
     const nextUnit = {
       ...data.unit,
       name: form.unitName.trim(),
       city: form.city.trim() || data.unit.city,
       neighborhood: form.neighborhood.trim() || data.unit.neighborhood,
-      fiscalEnabled: form.fiscalEnabled,
     };
 
     setOrganization(nextOrganization);
@@ -1112,8 +1119,17 @@ export function SaboreApp({
     log(`Configuracao da unidade ${nextUnit.name} atualizada`);
     void persistMutation({
       type: "update_unit_settings",
-      organization: nextOrganization,
-      unit: nextUnit,
+      organization: {
+        id: nextOrganization.id,
+        name: nextOrganization.name,
+      },
+      unit: {
+        id: nextUnit.id,
+        organizationId: nextUnit.organizationId,
+        name: nextUnit.name,
+        city: nextUnit.city,
+        neighborhood: nextUnit.neighborhood,
+      },
     });
   }
 
@@ -2895,14 +2911,12 @@ function AdminView({
   onCreateUser: (form: UserForm) => void;
   onUpdateUnitSettings: (form: UnitSettingsForm) => void;
 }) {
+  const activePlan = getPlanByCode(data.organization.planCode);
   const [settingsForm, setSettingsForm] = useState<UnitSettingsForm>({
     organizationName: data.organization.name,
-    planCode: data.organization.planCode,
-    planPrice: String(data.organization.planPrice),
     unitName: data.unit.name,
     city: data.unit.city,
     neighborhood: data.unit.neighborhood,
-    fiscalEnabled: data.unit.fiscalEnabled,
   });
   const [userForm, setUserForm] = useState<UserForm>({
     name: "",
@@ -2911,6 +2925,9 @@ function AdminView({
     role: "cashier",
   });
   const canManage = !currentUser || currentUser.role === "owner" || currentUser.role === "manager";
+  const roleOptions = Object.entries(roleLabel).filter(
+    ([role]) => role !== "kitchen" || hasPlanFeature(data.organization.planCode, "kds"),
+  );
 
   function submitUser() {
     onCreateUser(userForm);
@@ -2924,7 +2941,7 @@ function AdminView({
           <CardHeader className="flex flex-row items-start justify-between gap-4">
             <div>
               <CardTitle>Configuracao da unidade</CardTitle>
-              <CardDescription>Dados base que aparecem no piloto e no fiscal.</CardDescription>
+              <CardDescription>Dados operacionais do estabelecimento.</CardDescription>
             </div>
             <Building2 className="size-5 text-muted-foreground" />
           </CardHeader>
@@ -2937,34 +2954,6 @@ function AdminView({
                   setSettingsForm((current) => ({ ...current, organizationName }))
                 }
               />
-              <MoneyField
-                label="Mensalidade base"
-                value={settingsForm.planPrice}
-                onChange={(planPrice) =>
-                  setSettingsForm((current) => ({ ...current, planPrice }))
-                }
-              />
-              <label className="grid gap-2 text-sm font-medium">
-                Plano
-                <select
-                  className="h-10 w-full min-w-0 rounded-md border border-border bg-background px-3 text-sm font-normal outline-none ring-ring transition focus:ring-2"
-                  value={settingsForm.planCode}
-                  onChange={(event) => {
-                    const plan = getPlanByCode(event.target.value);
-                    setSettingsForm((current) => ({
-                      ...current,
-                      planCode: plan.code,
-                      planPrice: String(plan.monthlyPrice),
-                    }));
-                  }}
-                >
-                  {corePlans.map((plan) => (
-                    <option key={plan.code} value={plan.code}>
-                      {plan.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <TextField
                 label="Unidade"
                 value={settingsForm.unitName}
@@ -2984,20 +2973,20 @@ function AdminView({
                   setSettingsForm((current) => ({ ...current, neighborhood }))
                 }
               />
-              <label className="flex min-h-10 items-center gap-3 rounded-md border border-border bg-background px-3 text-sm font-medium">
-                <input
-                  className="size-4 accent-primary"
-                  checked={settingsForm.fiscalEnabled}
-                  type="checkbox"
-                  onChange={(event) =>
-                    setSettingsForm((current) => ({
-                      ...current,
-                      fiscalEnabled: event.target.checked,
-                    }))
-                  }
-                />
-                Fiscal NFC-e habilitado apos setup
-              </label>
+              <div className="rounded-md border border-border bg-muted/25 px-3 py-2">
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Plano atual
+                </p>
+                <p className="mt-1 text-sm font-semibold">{activePlan.name}</p>
+              </div>
+              <div className="rounded-md border border-border bg-muted/25 px-3 py-2">
+                <p className="text-xs font-medium uppercase text-muted-foreground">
+                  Fiscal NFC-e
+                </p>
+                <p className="mt-1 text-sm font-semibold">
+                  {data.unit.fiscalEnabled ? "Habilitado" : "Setup pendente"}
+                </p>
+              </div>
             </div>
             <Button disabled={!canManage} onClick={() => onUpdateUnitSettings(settingsForm)}>
               <Settings />
@@ -3048,7 +3037,7 @@ function AdminView({
                     }))
                   }
                 >
-                  {Object.entries(roleLabel).map(([role, label]) => (
+                  {roleOptions.map(([role, label]) => (
                     <option key={role} value={role}>
                       {label}
                     </option>
@@ -3091,7 +3080,7 @@ function AdminView({
       <Card>
         <CardHeader>
           <CardTitle>Planos e modulos</CardTitle>
-          <CardDescription>Estrutura comercial revisada para manter entrada barata.</CardDescription>
+          <CardDescription>Plano atual e modulos disponiveis para contratacao.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="grid gap-3 md:grid-cols-2">
@@ -3105,8 +3094,10 @@ function AdminView({
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="font-medium">{plan.name}</p>
-                  <Badge variant={plan.highlighted ? "success" : "neutral"}>
-                    {plan.price}
+                  <Badge
+                    variant={plan.code === data.organization.planCode ? "success" : "neutral"}
+                  >
+                    {plan.code === data.organization.planCode ? "Ativo" : plan.price}
                   </Badge>
                 </div>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -3153,6 +3144,7 @@ function StockView({
   onOpenDialog: (dialog: StockDialog) => void;
   onAdjustStock: (form: StockAdjustmentForm) => boolean;
 }) {
+  const canSeeLots = hasPlanFeature(data.organization.planCode, "lots");
   const [stockForm, setStockForm] = useState<StockAdjustmentForm>({
     ingredientId: data.ingredients[0]?.id ?? "",
     quantity: "",
@@ -3204,7 +3196,7 @@ function StockView({
             <Minus />
             Dar baixa
           </Button>
-          {hasPlanFeature(data.organization.planCode, "lots") && (
+          {canSeeLots && (
             <Button variant="secondary" onClick={() => onOpenDialog("lots")}>
               <PackageCheck />
               Lotes e validade
@@ -3241,14 +3233,16 @@ function StockView({
               </p>
               <div className="mt-4 space-y-2 text-sm text-muted-foreground">
                 <Row label="Valor em estoque" value={formatCurrency(position.costValue)} />
-                <Row
-                  label="Validade mais proxima"
-                  value={
-                    position.closestExpiryDays === null
-                      ? "-"
-                      : `${position.closestExpiryDays} dias`
-                  }
-                />
+                {canSeeLots && (
+                  <Row
+                    label="Validade mais proxima"
+                    value={
+                      position.closestExpiryDays === null
+                        ? "-"
+                        : `${position.closestExpiryDays} dias`
+                    }
+                  />
+                )}
               </div>
             </CardContent>
           </Card>
@@ -3447,55 +3441,72 @@ function ReportsView({
   data: SaboreData;
   cmv: number;
 }) {
+  const canSeeRealCmv = hasPlanFeature(data.organization.planCode, "realCmv");
+
   return (
     <div className="grid gap-5 pt-5 xl:grid-cols-[1fr_360px]">
-      <Card>
-        <CardHeader>
-          <CardTitle>Ficha tecnica e margem</CardTitle>
-          <CardDescription>CMV teorico por produto vendido no piloto.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="text-xs uppercase text-muted-foreground">
-                <tr className="border-b border-border">
-                  <th className="py-3">Produto</th>
-                  <th>Preco</th>
-                  <th>Custo</th>
-                  <th>CMV</th>
-                  <th>Margem</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recipeCosts.map((cost) => (
-                  <tr key={cost.productId} className="border-b border-border/60">
-                    <td className="py-3 font-medium">{cost.productName}</td>
-                    <td>{formatCurrency(cost.price)}</td>
-                    <td>{formatCurrency(cost.cost)}</td>
-                    <td>
-                      <Badge variant={cost.cmv > 0.38 ? "warning" : "success"}>
-                        {formatPercent(cost.cmv)}
-                      </Badge>
-                    </td>
-                    <td>{formatCurrency(cost.margin)}</td>
+      {canSeeRealCmv ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Ficha tecnica e margem</CardTitle>
+            <CardDescription>CMV teorico por produto vendido no piloto.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-left text-sm">
+                <thead className="text-xs uppercase text-muted-foreground">
+                  <tr className="border-b border-border">
+                    <th className="py-3">Produto</th>
+                    <th>Preco</th>
+                    <th>Custo</th>
+                    <th>CMV</th>
+                    <th>Margem</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+                </thead>
+                <tbody>
+                  {recipeCosts.map((cost) => (
+                    <tr key={cost.productId} className="border-b border-border/60">
+                      <td className="py-3 font-medium">{cost.productName}</td>
+                      <td>{formatCurrency(cost.price)}</td>
+                      <td>{formatCurrency(cost.cost)}</td>
+                      <td>
+                        <Badge variant={cost.cmv > 0.38 ? "warning" : "success"}>
+                          {formatPercent(cost.cmv)}
+                        </Badge>
+                      </td>
+                      <td>{formatCurrency(cost.margin)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle>Resumo de vendas e caixa</CardTitle>
+            <CardDescription>Leitura basica do turno atual.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <Row label="Vendas pagas" value={formatCurrency(closing.salesTotal)} />
+            <Row label="Gaveta esperada" value={formatCurrency(closing.expectedDrawer)} />
+          </CardContent>
+        </Card>
+      )}
 
       <div className="space-y-5">
         <Card>
           <CardHeader>
             <CardTitle>Resumo do turno</CardTitle>
-            <CardDescription>Caixa e CMV lado a lado.</CardDescription>
+            <CardDescription>
+              {canSeeRealCmv ? "Caixa e CMV lado a lado." : "Caixa do turno atual."}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <Row label="Vendas pagas" value={formatCurrency(closing.salesTotal)} />
             <Row label="Gaveta esperada" value={formatCurrency(closing.expectedDrawer)} />
-            <Row label="CMV atual" value={formatPercent(cmv)} strong />
+            {canSeeRealCmv && <Row label="CMV atual" value={formatPercent(cmv)} strong />}
           </CardContent>
         </Card>
 

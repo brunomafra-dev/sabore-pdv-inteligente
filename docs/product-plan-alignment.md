@@ -25,10 +25,12 @@ This note checks the current product against the revised commercial model.
 - Architecture and README now describe non-fiscal base plans and fiscal as assisted setup.
 - Organizations now carry `plan_code` as well as `plan_price`.
 - Navigation and order behavior now respect plan features: Essencial hides KDS/delivery, and automatic stock movements only run when `autoStock` is available.
+- Customer Admin no longer edits plan, price or fiscal enablement; those are commercial/internal controls.
+- Mutation API now checks the stored plan before accepting delivery orders, automatic stock movements, KDS status changes, recipe items and kitchen-only users.
 
 ## Still Needed
 
-- Server-side feature enforcement for every paid feature mutation/API route.
+- Server-side feature enforcement for add-on API routes such as WhatsApp, fiscal and future marketplace callbacks.
 - Billing/subscription records.
 - Public site delivery module.
 - Fiscal route hardening before any real NFC-e.

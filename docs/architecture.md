@@ -25,7 +25,7 @@ Sabore is a web-first restaurant operating system for local pilots in Maceio.
 
 The UI attempts to load Supabase data server-side when env vars are present. If env vars are missing, RLS blocks the read, or the database has not been seeded, it falls back to `src/lib/demo-data.ts`. Run `supabase/schema.sql` first and `supabase/seed.sql` second to load the pilot dataset.
 
-Organizations store both `plan_code` and `plan_price`. The code-defined feature catalog decides which modules are visible and usable for each plan; price alone is not treated as a permission model.
+Organizations store both `plan_code` and `plan_price`. The code-defined feature catalog decides which modules are visible and usable for each plan; price alone is not treated as a permission model. Restaurant Admin screens can edit operational identity, users and unit data, but cannot self-change plan, price or fiscal enablement.
 
 ## Commercial Defaults
 

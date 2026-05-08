@@ -313,6 +313,8 @@ async function verifyMobile(browser) {
     adminText.includes("Configuracao da unidade") &&
     adminText.includes("Usuarios e acessos") &&
     adminText.includes("Planos e modulos");
+  const commercialSettingsReadOnly =
+    adminText.includes("Plano atual") && !adminText.includes("Mensalidade base");
 
   const bodyText = (await page.locator("body").innerText()).trim();
   const textLength = bodyText.length;
@@ -343,6 +345,7 @@ async function verifyMobile(browser) {
     movementPopupVisible,
     lotsPopupVisible,
     adminVisible,
+    commercialSettingsReadOnly,
     planBadgeUsesName,
     errors,
   };
@@ -384,6 +387,7 @@ if (
   !mobile.movementPopupVisible ||
   !mobile.lotsPopupVisible ||
   !mobile.adminVisible ||
+  !mobile.commercialSettingsReadOnly ||
   !mobile.planBadgeUsesName ||
   !mobile.composerClearedOnNavigation
 ) {

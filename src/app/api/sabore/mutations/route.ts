@@ -12,6 +12,7 @@ import {
   payloadErrorResponse,
 } from "@/lib/security/request";
 import { apiRateLimit, enforceRateLimit } from "@/lib/security/rate-limit";
+import { hasPlanFeature, type PlanFeature } from "@/lib/commercial-plans";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -92,8 +93,6 @@ function organizationSettingsRow(
 ) {
   return {
     name: organization.name,
-    plan_code: organization.planCode,
-    plan_price: organization.planPrice,
   };
 }
 
@@ -102,7 +101,6 @@ function unitSettingsRow(unit: Extract<SaboreMutation, { type: "update_unit_sett
     name: unit.name,
     city: unit.city,
     neighborhood: unit.neighborhood,
-    fiscal_enabled: unit.fiscalEnabled,
   };
 }
 
@@ -182,11 +180,64 @@ async function assertOrderAccess(
 ) {
   const rows = (await must(
     "orders access",
-    client.from("orders").select("id").eq("id", orderId).eq("unit_id", profile.unitId),
-  )) as Array<{ id: string }>;
+    client
+      .from("orders")
+      .select("id, channel")
+      .eq("id", orderId)
+      .eq("unit_id", profile.unitId),
+  )) as Array<{ id: string; channel: string }>;
 
   if (rows.length !== 1) {
     throw new AccessError("Pedido nao pertence a unidade do usuario", 403);
+  }
+
+  return rows[0];
+}
+
+async function getCommercialState(client: SupabaseClient, unitId: string) {
+  const units = (await must(
+    "unit commercial state",
+    client
+      .from("restaurant_units")
+      .select("id, organization_id, fiscal_enabled")
+      .eq("id", unitId),
+  )) as Array<{
+    id: string;
+    organization_id: string;
+    fiscal_enabled: boolean | null;
+  }>;
+
+  if (units.length !== 1) {
+    throw new AccessError("Unidade comercial indisponivel", 403);
+  }
+
+  const organizations = (await must(
+    "organization commercial state",
+    client
+      .from("organizations")
+      .select("id, plan_code")
+      .eq("id", units[0].organization_id),
+  )) as Array<{ id: string; plan_code: string | null }>;
+
+  if (organizations.length !== 1) {
+    throw new AccessError("Plano comercial indisponivel", 403);
+  }
+
+  const planCode = organizations[0].plan_code === "operation" ? "operation" : "essential";
+
+  return {
+    fiscalEnabled: Boolean(units[0].fiscal_enabled),
+    planCode,
+  };
+}
+
+function requirePlanFeature(
+  planCode: string,
+  feature: PlanFeature,
+  message: string,
+) {
+  if (!hasPlanFeature(planCode, feature)) {
+    throw new AccessError(message, 403);
   }
 }
 
@@ -222,9 +273,28 @@ async function authorizeMutation(
     throw new AccessError("Perfil sem permissao para esta operacao", 403);
   }
 
+  const commercialState = await getCommercialState(client, profile.unitId);
+
   switch (mutation.type) {
     case "create_order": {
       ensureUnit(mutation.order.unitId, profile);
+      if (mutation.order.channel === "delivery") {
+        requirePlanFeature(
+          commercialState.planCode,
+          "internalDelivery",
+          "Delivery proprio nao esta liberado neste plano",
+        );
+      }
+      if (mutation.movements.length > 0) {
+        requirePlanFeature(
+          commercialState.planCode,
+          "autoStock",
+          "Baixa automatica de estoque nao esta liberada neste plano",
+        );
+      }
+      if (mutation.order.fiscalStatus !== "disabled" && !commercialState.fiscalEnabled) {
+        throw new AccessError("Fiscal NFC-e nao esta habilitado para esta unidade", 403);
+      }
       mutation.movements.forEach((movement) => ensureUnit(movement.unitId, profile));
       await assertRows(
         client,
@@ -247,7 +317,21 @@ async function authorizeMutation(
       break;
     }
     case "append_order_items": {
-      await assertOrderAccess(client, mutation.orderId, profile);
+      const order = await assertOrderAccess(client, mutation.orderId, profile);
+      if (order.channel === "delivery") {
+        requirePlanFeature(
+          commercialState.planCode,
+          "internalDelivery",
+          "Delivery proprio nao esta liberado neste plano",
+        );
+      }
+      if (mutation.movements.length > 0) {
+        requirePlanFeature(
+          commercialState.planCode,
+          "autoStock",
+          "Baixa automatica de estoque nao esta liberada neste plano",
+        );
+      }
       mutation.movements.forEach((movement) => ensureUnit(movement.unitId, profile));
       await assertRows(
         client,
@@ -259,7 +343,17 @@ async function authorizeMutation(
       );
       break;
     }
-    case "update_order_status":
+    case "update_order_status": {
+      if (mutation.status === "preparing" || mutation.status === "ready") {
+        requirePlanFeature(
+          commercialState.planCode,
+          "kds",
+          "KDS/cozinha nao esta liberado neste plano",
+        );
+      }
+      await assertOrderAccess(client, mutation.orderId, profile);
+      break;
+    }
     case "update_whatsapp_status": {
       await assertOrderAccess(client, mutation.orderId, profile);
       break;
@@ -298,6 +392,11 @@ async function authorizeMutation(
       break;
     }
     case "create_recipe_item": {
+      requirePlanFeature(
+        commercialState.planCode,
+        "recipes",
+        "Ficha tecnica nao esta liberada neste plano",
+      );
       await assertRecipeAccess(client, mutation, profile);
       break;
     }
@@ -351,6 +450,13 @@ async function authorizeMutation(
       break;
     }
     case "create_user_profile": {
+      if (mutation.profile.role === "kitchen") {
+        requirePlanFeature(
+          commercialState.planCode,
+          "kds",
+          "Usuario de cozinha depende do modulo KDS",
+        );
+      }
       ensureUnit(mutation.profile.unitId, profile);
       break;
     }
