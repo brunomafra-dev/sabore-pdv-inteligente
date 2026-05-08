@@ -50,7 +50,7 @@ async function cleanupSmokeData() {
     .from("order_items")
     .select("order_id")
     .in("order_id", candidateIds)
-    .eq("custom_name", "Grande 35 cm Calabresa");
+    .eq("custom_name", "Grande 8 fatias Mussarela");
   const orderIds = [...new Set((testItems ?? []).map((item) => item.order_id))];
 
   if (orderIds.length === 0) return;

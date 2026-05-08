@@ -1,6 +1,6 @@
 import type { Product } from "./types";
 
-export type PizzaSizeId = "media" | "grande" | "familia";
+export type PizzaSizeId = "brotinho" | "grande";
 
 export interface PizzaSize {
   id: PizzaSizeId;
@@ -39,104 +39,186 @@ export interface BuiltPizza {
 
 export const pizzaSizes: PizzaSize[] = [
   {
-    id: "media",
-    label: "Media",
-    diameter: "30 cm",
-    slices: 6,
-    baseProductName: "Pizza media - monte sua (30cm)",
+    id: "brotinho",
+    label: "Brotinho",
+    diameter: "individual",
+    slices: 4,
+    baseProductName: "Pizza brotinho - monte sua",
   },
   {
     id: "grande",
     label: "Grande",
-    diameter: "35 cm",
+    diameter: "8 fatias",
     slices: 8,
-    baseProductName: "Pizza grande - monte sua (35cm)",
-  },
-  {
-    id: "familia",
-    label: "Familia",
-    diameter: "40 cm",
-    slices: 10,
-    baseProductName: "Pizza familia - monte sua (40cm)",
+    baseProductName: "Pizza grande - monte sua",
   },
 ];
 
 export const pizzaFlavors: PizzaFlavor[] = [
   {
+    id: "mussarela",
+    name: "Mussarela",
+    ingredients: "Molho de tomate, queijo mussarela, azeitonas e oregano",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
+    id: "dois-queijos",
+    name: "Dois queijos",
+    ingredients: "Molho de tomate, mussarela, catupiry e oregano",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
     id: "marguerita",
-    name: "Marguerita",
-    ingredients: "Mussarela, tomate, manjericao e molho da casa",
-    prices: { media: 48, grande: 62, familia: 76 },
+    name: "Margheritta",
+    ingredients: "Molho de tomate, mussarela, tomate, manjericao e oregano",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
+    id: "mista",
+    name: "Mista",
+    ingredients: "Molho de tomate, mussarela, presunto, tomate e oregano",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
+    id: "milho-verde",
+    name: "Milho verde",
+    ingredients: "Mussarela, molho de tomate, milho verde, tomate e oregano",
+    prices: { brotinho: 20, grande: 45 },
   },
   {
     id: "calabresa",
     name: "Calabresa",
-    ingredients: "Calabresa artesanal, cebola roxa, mussarela e oregano",
-    prices: { media: 50, grande: 64, familia: 78 },
-  },
-  {
-    id: "frango-catupiry",
-    name: "Frango com catupiry",
-    ingredients: "Frango desfiado, catupiry, milho, mussarela e oregano",
-    prices: { media: 54, grande: 68, familia: 84 },
+    ingredients: "Molho de tomate, mussarela, calabresa, cebola, azeitona e oregano",
+    prices: { brotinho: 20, grande: 45 },
   },
   {
     id: "portuguesa",
     name: "Portuguesa",
-    ingredients: "Presunto, ovo, cebola, pimentao, azeitona e mussarela",
-    prices: { media: 55, grande: 70, familia: 86 },
+    ingredients: "Molho de tomate, mussarela, cebola, milho verde, azeitona, ovos, presunto, pimentao e oregano",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
+    id: "cartola",
+    name: "Cartola",
+    ingredients: "Mussarela, banana, acucar e canela em po",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
+    id: "banana-doce-leite",
+    name: "Banana com doce de leite",
+    ingredients: "Mussarela, banana e doce de leite",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
+    id: "chocolate-morango",
+    name: "Chocolate com morango",
+    ingredients: "Mussarela, chocolate Nestle e morango fatiado",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
+    id: "chocolate-banana",
+    name: "Chocolate com banana",
+    ingredients: "Mussarela, chocolate Nestle e banana fatiada",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
+    id: "brigadeiro",
+    name: "Brigadeiro",
+    ingredients: "Mussarela, chocolate Nestle e granulado",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
+    id: "romeu-julieta",
+    name: "Romeu e Julieta",
+    ingredients: "Mussarela, goiabada e catupiry",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
+    id: "banana-nevada",
+    name: "Banana nevada",
+    ingredients: "Mussarela, banana, acucar, canela em po e chocolate branco",
+    prices: { brotinho: 20, grande: 45 },
+  },
+  {
+    id: "frango-catupiry",
+    name: "Frango com catupiry",
+    ingredients: "Molho de tomate, mussarela, frango desfiado, catupiry e oregano",
+    prices: { brotinho: 25, grande: 50 },
+  },
+  {
+    id: "frango-caipira",
+    name: "Frango caipira",
+    ingredients: "Molho de tomate, mussarela, frango desfiado, bacon, milho verde e oregano",
+    prices: { brotinho: 25, grande: 50 },
+  },
+  {
+    id: "baiana",
+    name: "Baiana",
+    ingredients: "Molho de tomate, mussarela, calabresa, pimenta calabresa, cebola e oregano",
+    prices: { brotinho: 25, grande: 50 },
   },
   {
     id: "quatro-queijos",
     name: "Quatro queijos",
-    ingredients: "Mussarela, parmesao, provolone, gorgonzola e oregano",
-    prices: { media: 58, grande: 74, familia: 92 },
+    ingredients: "Molho de tomate, mussarela, provolone, parmesao, catupiry e oregano",
+    prices: { brotinho: 25, grande: 50 },
   },
   {
-    id: "pepperoni",
-    name: "Pepperoni",
-    ingredients: "Pepperoni, mussarela, molho rustico e oregano",
-    prices: { media: 60, grande: 78, familia: 96 },
+    id: "lombo-catupiry",
+    name: "Lombo catupiry",
+    ingredients: "Molho de tomate, mussarela, lombo defumado, catupiry e oregano",
+    prices: { brotinho: 25, grande: 50 },
+  },
+  {
+    id: "catupirela",
+    name: "Catupirela",
+    ingredients: "Molho de tomate, mussarela, calabresa, catupiry, cebola e oregano",
+    prices: { brotinho: 25, grande: 50 },
+  },
+  {
+    id: "atum",
+    name: "Atum",
+    ingredients: "Molho de tomate, mussarela, atum ralado, cebola e oregano",
+    prices: { brotinho: 25, grande: 50 },
+  },
+  {
+    id: "dos-nunes",
+    name: "Dos Nunes",
+    ingredients: "Molho de tomate, mussarela, file de alcatra em cubos, catupiry e oregano",
+    prices: { brotinho: 25, grande: 52 },
+  },
+  {
+    id: "file-barbecue",
+    name: "File barbecue",
+    ingredients: "Molho de tomate, mussarela, file de alcatra em cubos, tomate, catupiry, barbecue e oregano",
+    prices: { brotinho: 25, grande: 52 },
+  },
+  {
+    id: "carne-sol",
+    name: "Carne de sol",
+    ingredients: "Molho de tomate, mussarela, carne de sol, tomate, cebola e oregano",
+    prices: { brotinho: 25, grande: 52 },
+  },
+  {
+    id: "frango-catupiry-bacon",
+    name: "Frango com catupiry e bacon",
+    ingredients: "Molho de tomate, mussarela, frango desfiado, bacon em cubos e catupiry",
+    prices: { brotinho: 25, grande: 52 },
+  },
+  {
+    id: "sertaneja",
+    name: "Sertaneja",
+    ingredients: "Molho de tomate, mussarela, carne de sol desfiada, cebola, queijo coalho e oregano",
+    prices: { brotinho: 25, grande: 52 },
   },
 ];
 
-export const pizzaToppings: PizzaTopping[] = [
-  {
-    id: "borda-catupiry",
-    name: "Borda catupiry",
-    type: "borda",
-    prices: { media: 9, grande: 12, familia: 15 },
-  },
-  {
-    id: "borda-cheddar",
-    name: "Borda cheddar",
-    type: "borda",
-    prices: { media: 9, grande: 12, familia: 15 },
-  },
-  {
-    id: "bacon-extra",
-    name: "Bacon extra",
-    type: "extra",
-    prices: { media: 6, grande: 8, familia: 10 },
-  },
-  {
-    id: "catupiry-extra",
-    name: "Catupiry extra",
-    type: "extra",
-    prices: { media: 6, grande: 8, familia: 10 },
-  },
-  {
-    id: "cebola-caramelizada",
-    name: "Cebola caramelizada",
-    type: "extra",
-    prices: { media: 5, grande: 7, familia: 9 },
-  },
-];
+export const pizzaToppings: PizzaTopping[] = [];
 
 export function createDefaultPizzaBuilder(): PizzaBuilderState {
   return {
     sizeId: "grande",
-    flavorIds: ["calabresa"],
+    flavorIds: ["mussarela"],
     toppingIds: [],
   };
 }
@@ -154,11 +236,12 @@ export function getPizzaTopping(toppingId: string) {
 }
 
 export function calculatePizzaPrice(builder: PizzaBuilderState) {
-  const flavorPrice = builder.flavorIds.reduce((sum, flavorId) => {
+  const flavorPrices = builder.flavorIds.map((flavorId) => {
     const flavor = getPizzaFlavor(flavorId);
 
-    return sum + (flavor?.prices[builder.sizeId] ?? 0) / builder.flavorIds.length;
-  }, 0);
+    return flavor?.prices[builder.sizeId] ?? 0;
+  });
+  const flavorPrice = Math.max(0, ...flavorPrices);
   const toppingsPrice = builder.toppingIds.reduce((sum, toppingId) => {
     const topping = getPizzaTopping(toppingId);
 
@@ -180,7 +263,8 @@ export function resolvePizzaBaseProduct(
       (product) =>
         product.category === "Pizzas" &&
         product.name.toLowerCase().includes(size.label.toLowerCase()),
-    )
+    ) ??
+    products.find((product) => product.category === "Pizzas")
   );
 }
 

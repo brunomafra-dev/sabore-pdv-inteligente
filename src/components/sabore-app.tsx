@@ -1843,7 +1843,8 @@ function OrderComposer({
               <div>
                 <p className="text-sm font-medium">Monte sua pizza</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Escolha tamanho, ate 2 sabores e adicionais. O preco atualiza na hora.
+                  Escolha brotinho ou grande e ate 2 sabores. O preco usa o sabor de
+                  maior valor.
                 </p>
               </div>
               <Badge variant="warning">
@@ -1917,32 +1918,34 @@ function OrderComposer({
                 </div>
               </div>
 
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">
-                  Bordas e extras
-                </p>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {pizzaToppings.map((topping) => {
-                    const selected = composer.pizzaBuilder.toppingIds.includes(
-                      topping.id,
-                    );
+              {pizzaToppings.length > 0 && (
+                <div>
+                  <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">
+                    Bordas e extras
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {pizzaToppings.map((topping) => {
+                      const selected = composer.pizzaBuilder.toppingIds.includes(
+                        topping.id,
+                      );
 
-                    return (
-                      <Button
-                        key={topping.id}
-                        variant={selected ? "secondary" : "outline"}
-                        className="justify-between"
-                        onClick={() => onTogglePizzaTopping(topping.id)}
-                      >
-                        <span>{topping.name}</span>
-                        <span className="text-xs font-normal">
-                          +{formatCurrency(topping.prices[composer.pizzaBuilder.sizeId])}
-                        </span>
-                      </Button>
-                    );
-                  })}
+                      return (
+                        <Button
+                          key={topping.id}
+                          variant={selected ? "secondary" : "outline"}
+                          className="justify-between"
+                          onClick={() => onTogglePizzaTopping(topping.id)}
+                        >
+                          <span>{topping.name}</span>
+                          <span className="text-xs font-normal">
+                            +{formatCurrency(topping.prices[composer.pizzaBuilder.sizeId])}
+                          </span>
+                        </Button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="rounded-md border border-border bg-background p-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1951,7 +1954,7 @@ function OrderComposer({
                       {pizzaPreview?.name ?? "Escolha pelo menos 1 sabor"}
                     </p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Base {formatCurrency(pizzaBasePrice)} - adicionais{" "}
+                      Sabores {formatCurrency(pizzaBasePrice)} - adicionais{" "}
                       {formatCurrency(pizzaToppingsPrice)}
                     </p>
                   </div>

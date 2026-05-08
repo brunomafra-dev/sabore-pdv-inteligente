@@ -22,11 +22,11 @@ test("calculates order totals with delivery, discount and remaining amount", () 
     items: [
       {
         id: "item-test-1",
-        productId: "prd-pizza-familia",
+        productId: "prd-pizza-grande",
         quantity: 1,
-        name: "Familia 40 cm Pepperoni",
-        unitPrice: 111,
-        notes: "10 fatias. Borda cheddar.",
+        name: "Grande 8 fatias Sertaneja",
+        unitPrice: 52,
+        notes: "8 fatias. Sem adicionais.",
       },
       { id: "item-test-2", productId: "prd-suco-uva", quantity: 1 },
     ],
@@ -39,11 +39,11 @@ test("calculates order totals with delivery, discount and remaining amount", () 
 
   const totals = calculateOrderTotals(order, demoData.products);
 
-  assert.equal(totals.subtotal, 126);
+  assert.equal(totals.subtotal, 67);
   assert.equal(totals.deliveryFee, 8);
   assert.equal(totals.discount, 5);
-  assert.equal(totals.total, 129);
-  assert.equal(totals.remaining, 129);
+  assert.equal(totals.total, 70);
+  assert.equal(totals.remaining, 70);
 });
 
 test("calculates recipe CMV from ficha tecnica", () => {
@@ -53,7 +53,7 @@ test("calculates recipe CMV from ficha tecnica", () => {
   const cost = calculateRecipeCost(product, demoData.ingredients, demoData.recipe);
 
   assert.equal(Number(cost.cost.toFixed(2)), 18.48);
-  assert.equal(Number(cost.cmv.toFixed(4)), 0.2981);
+  assert.equal(Number(cost.cmv.toFixed(4)), 0.4107);
 });
 
 test("generates stock movements for an order using recipe quantities", () => {
@@ -109,7 +109,7 @@ test("closes cash session by payment method", () => {
     demoData.products,
   );
 
-  assert.equal(closing.salesTotal, 54.5);
-  assert.equal(closing.byMethod.pix, 54.5);
+  assert.equal(closing.salesTotal, 26.5);
+  assert.equal(closing.byMethod.pix, 26.5);
   assert.equal(closing.expectedDrawer, 150);
 });
