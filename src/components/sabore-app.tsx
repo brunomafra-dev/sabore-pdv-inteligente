@@ -20,6 +20,7 @@ import {
   PackagePlus,
   PackageCheck,
   Plus,
+  Printer,
   ReceiptText,
   RefreshCw,
   Send,
@@ -190,6 +191,11 @@ type DeliveryOrderAlert = {
   customerName: string;
   total: number;
   openedAt: string;
+};
+
+type PrintReceiptState = {
+  orderId: string;
+  issuedAt: string;
 };
 
 const SmallTableIcon = (({
@@ -493,6 +499,19 @@ function formatDuration(minutes: number) {
   return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
+function formatReceiptDate(isoDate: string) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(isoDate));
+}
+
+function getOrderItemUnitPrice(item: Order["items"][number], products: Product[]) {
+  const product = products.find((candidate) => candidate.id === item.productId);
+
+  return item.unitPrice ?? product?.price ?? 0;
+}
+
 function playDeliveryNotificationSound() {
   try {
     type AudioWindow = Window &
@@ -598,6 +617,7 @@ export function SaboreApp({
     cloneData(initialData.cashSession),
   );
   const [composer, setComposer] = useState<ComposerState | null>(null);
+  const [printReceipt, setPrintReceipt] = useState<PrintReceiptState | null>(null);
   const [dismissedDeliveryAlertIds, setDismissedDeliveryAlertIds] = useState<string[]>(
     [],
   );
@@ -621,6 +641,22 @@ export function SaboreApp({
 
     return () => window.clearInterval(interval);
   }, []);
+  useEffect(() => {
+    function clearPrintedReceipt() {
+      setPrintReceipt(null);
+    }
+
+    window.addEventListener("afterprint", clearPrintedReceipt);
+
+    return () => window.removeEventListener("afterprint", clearPrintedReceipt);
+  }, []);
+  useEffect(() => {
+    if (!printReceipt) return;
+
+    const timeout = window.setTimeout(() => window.print(), 120);
+
+    return () => window.clearTimeout(timeout);
+  }, [printReceipt]);
   useEffect(() => {
     if (dataSource?.source !== "supabase" || !accessToken) return;
 
@@ -806,6 +842,9 @@ export function SaboreApp({
     pendingDeliveryOrders,
     products,
   ]);
+  const printReceiptOrder = printReceipt
+    ? orders.find((order) => order.id === printReceipt.orderId)
+    : undefined;
 
   function log(message: string) {
     setActivity((current) => [message, ...current].slice(0, 6));
@@ -1295,7 +1334,8 @@ export function SaboreApp({
     const order = orders.find((candidate) => candidate.id === orderId);
 
     if (order) {
-      log(`Conta do pedido ${order.code} gerada para conferencia`);
+      setPrintReceipt({ orderId, issuedAt: getCurrentIso() });
+      log(`Recibo nao fiscal do pedido ${order.code} enviado para impressao`);
     }
   }
 
@@ -1673,7 +1713,8 @@ export function SaboreApp({
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <>
+      <div className="sabore-screen min-h-screen bg-background text-foreground">
       {deliveryAlert && canReceiveDeliveryAlerts ? (
         <DeliveryNewOrderToast
           alert={deliveryAlert}
@@ -1852,6 +1893,7 @@ export function SaboreApp({
                   tableId: order.tableId,
                 })
               }
+              onGenerateBill={generateBill}
               onFinalize={finalizeOrder}
             />
           )}
@@ -1865,6 +1907,7 @@ export function SaboreApp({
               onCancel={cancelOrder}
               onToggleAvailability={toggleDeliveryItemAvailability}
               onPay={payOrder}
+              onPrintReceipt={generateBill}
               onSendWhatsApp={sendWhatsApp}
             />
           )}
@@ -1912,7 +1955,178 @@ export function SaboreApp({
           )}
         </main>
       </div>
-    </div>
+      </div>
+      {printReceipt && printReceiptOrder ? (
+        <NonFiscalReceiptPrint
+          data={data}
+          issuedAt={printReceipt.issuedAt}
+          order={printReceiptOrder}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function NonFiscalReceiptPrint({
+  data,
+  issuedAt,
+  order,
+}: {
+  data: SaboreData;
+  issuedAt: string;
+  order: Order;
+}) {
+  const totals = calculateOrderTotals(order, data.products);
+  const table = data.tables.find((candidate) => candidate.id === order.tableId);
+  const customer = data.customers.find((candidate) => candidate.id === order.customerId);
+  const detail = data.deliveryDetails.find((candidate) => candidate.orderId === order.id);
+  const orderLabel =
+    order.channel === "table"
+      ? table?.label ?? "Mesa"
+      : order.channel === "delivery"
+        ? detail?.fulfillment === "pickup"
+          ? "Retirada"
+          : "Delivery"
+        : "Bancada";
+  const deliveryAddress =
+    detail?.fulfillment === "delivery"
+      ? [detail.street, detail.number, detail.complement].filter(Boolean).join(", ")
+      : "";
+
+  return (
+    <section className="sabore-print-root">
+      <div className="receipt-paper">
+        <div className="receipt-center">
+          <strong className="receipt-title">{data.organization.name}</strong>
+          <span>{data.unit.name}</span>
+          <span>
+            {data.unit.neighborhood}, {data.unit.city}
+          </span>
+        </div>
+
+        <div className="receipt-warning">
+          DOCUMENTO NAO FISCAL
+          <br />
+          Nao substitui NFC-e, nota fiscal ou cupom fiscal.
+        </div>
+
+        <div className="receipt-lines">
+          <div>
+            <span>Pedido</span>
+            <strong>#{order.code}</strong>
+          </div>
+          <div>
+            <span>Tipo</span>
+            <strong>{orderLabel}</strong>
+          </div>
+          <div>
+            <span>Aberto</span>
+            <span>{formatReceiptDate(order.openedAt)}</span>
+          </div>
+          <div>
+            <span>Impresso</span>
+            <span>{formatReceiptDate(issuedAt)}</span>
+          </div>
+          {customer ? (
+            <div>
+              <span>Cliente</span>
+              <span>{customer.name}</span>
+            </div>
+          ) : null}
+          {detail?.phone || customer?.phone ? (
+            <div>
+              <span>Telefone</span>
+              <span>{detail?.phone ?? customer?.phone}</span>
+            </div>
+          ) : null}
+          {deliveryAddress ? (
+            <div>
+              <span>Endereco</span>
+              <span>{deliveryAddress}</span>
+            </div>
+          ) : null}
+          {detail?.reference ? (
+            <div>
+              <span>Ref.</span>
+              <span>{detail.reference}</span>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="receipt-separator" />
+
+        <div className="receipt-items">
+          {order.items.map((item) => {
+            const unitPrice = getOrderItemUnitPrice(item, data.products);
+
+            return (
+              <div key={item.id} className="receipt-item">
+                <div>
+                  <strong>{getItemLabel(item, data.products)}</strong>
+                  <span>
+                    {item.quantity} x {formatCurrency(unitPrice)}
+                  </span>
+                  {item.notes ? <span>Obs: {item.notes}</span> : null}
+                </div>
+                <strong>{formatCurrency(unitPrice * item.quantity)}</strong>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="receipt-separator" />
+
+        <div className="receipt-lines">
+          <div>
+            <span>Subtotal</span>
+            <strong>{formatCurrency(totals.subtotal)}</strong>
+          </div>
+          {totals.deliveryFee > 0 ? (
+            <div>
+              <span>Entrega</span>
+              <strong>{formatCurrency(totals.deliveryFee)}</strong>
+            </div>
+          ) : null}
+          {totals.discount > 0 ? (
+            <div>
+              <span>Desconto</span>
+              <strong>-{formatCurrency(totals.discount)}</strong>
+            </div>
+          ) : null}
+          <div className="receipt-total">
+            <span>Total</span>
+            <strong>{formatCurrency(totals.total)}</strong>
+          </div>
+          <div>
+            <span>Pago</span>
+            <strong>{formatCurrency(totals.paid)}</strong>
+          </div>
+          <div>
+            <span>Falta</span>
+            <strong>{formatCurrency(totals.remaining)}</strong>
+          </div>
+        </div>
+
+        {order.payments.length > 0 ? (
+          <>
+            <div className="receipt-separator" />
+            <div className="receipt-lines">
+              {order.payments.map((payment) => (
+                <div key={payment.id}>
+                  <span>{paymentLabel[payment.method]}</span>
+                  <strong>{formatCurrency(payment.amount)}</strong>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : null}
+
+        <div className="receipt-footer">
+          <strong>Obrigado pela preferencia.</strong>
+          <span>Sabore - PDV Inteligente</span>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -2746,8 +2960,8 @@ function ServiceView({
                       variant="outline"
                       onClick={() => onGenerateBill(order.id)}
                     >
-                      <ReceiptText />
-                      Gerar recibo
+                      <Printer />
+                      Imprimir recibo
                     </Button>
                     <Button
                       className="w-full"
@@ -2823,8 +3037,8 @@ function ServiceView({
                       variant="outline"
                       onClick={() => onGenerateBill(order.id)}
                     >
-                      <ReceiptText />
-                      Gerar conta
+                      <Printer />
+                      Imprimir conta
                     </Button>
                     <Button
                       className="w-full"
@@ -2859,6 +3073,7 @@ function TablesView({
   onNewCounter,
   onOpenTable,
   onAddItems,
+  onGenerateBill,
   onFinalize,
 }: {
   orders: Order[];
@@ -2866,6 +3081,7 @@ function TablesView({
   onNewCounter: () => void;
   onOpenTable: (tableId: string) => void;
   onAddItems: (order: Order) => void;
+  onGenerateBill: (orderId: string) => void;
   onFinalize: (orderId: string) => void;
 }) {
   const activeTableOrders = orders.filter(
@@ -2930,6 +3146,15 @@ function TablesView({
                     <Button className="w-full" size="sm" onClick={() => onAddItems(activeOrder)}>
                       <Plus />
                       Atender mesa
+                    </Button>
+                    <Button
+                      className="w-full"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onGenerateBill(activeOrder.id)}
+                    >
+                      <Printer />
+                      Imprimir conta
                     </Button>
                     <Button
                       className="w-full"
@@ -3031,6 +3256,7 @@ function DeliveryView({
   onCancel,
   onToggleAvailability,
   onPay,
+  onPrintReceipt,
   onSendWhatsApp,
 }: {
   orders: Order[];
@@ -3041,6 +3267,7 @@ function DeliveryView({
   onCancel: (orderId: string) => void;
   onToggleAvailability: (itemId: string, available: boolean) => void;
   onPay: (orderId: string, method: PaymentMethod) => void;
+  onPrintReceipt: (orderId: string) => void;
   onSendWhatsApp: (orderId: string) => void;
 }) {
   const deliveryOrders = orders.filter(
@@ -3191,6 +3418,15 @@ function DeliveryView({
                       Avancar
                     </Button>
                   )}
+                  <Button
+                    className="w-full"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onPrintReceipt(order.id)}
+                  >
+                    <Printer />
+                    Imprimir recibo
+                  </Button>
                   <Button
                     className="w-full"
                     size="sm"

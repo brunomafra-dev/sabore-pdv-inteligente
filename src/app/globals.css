@@ -64,3 +64,100 @@ button {
 button:disabled {
   cursor: not-allowed;
 }
+
+.sabore-print-root {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 4mm;
+  }
+
+  body {
+    background: white;
+    color: black;
+  }
+
+  .sabore-screen {
+    display: none !important;
+  }
+
+  .sabore-print-root {
+    display: block;
+  }
+
+  .receipt-paper {
+    width: 72mm;
+    color: #000;
+    font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .receipt-center,
+  .receipt-footer {
+    display: grid;
+    gap: 2px;
+    text-align: center;
+  }
+
+  .receipt-title {
+    font-size: 14px;
+    text-transform: uppercase;
+  }
+
+  .receipt-warning {
+    margin: 10px 0;
+    border: 1px solid #000;
+    padding: 6px;
+    text-align: center;
+    font-weight: 700;
+  }
+
+  .receipt-separator {
+    margin: 8px 0;
+    border-top: 1px dashed #000;
+  }
+
+  .receipt-lines {
+    display: grid;
+    gap: 3px;
+  }
+
+  .receipt-lines > div,
+  .receipt-item,
+  .receipt-total {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .receipt-lines span:last-child,
+  .receipt-lines strong:last-child,
+  .receipt-item > strong {
+    text-align: right;
+  }
+
+  .receipt-items {
+    display: grid;
+    gap: 6px;
+  }
+
+  .receipt-item > div {
+    display: grid;
+    gap: 1px;
+  }
+
+  .receipt-total {
+    margin-top: 4px;
+    border-top: 1px solid #000;
+    padding-top: 4px;
+    font-size: 13px;
+  }
+
+  .receipt-footer {
+    margin-top: 12px;
+  }
+}
